@@ -1,0 +1,5 @@
+-- seed.sql
+-- Optional seed data, loaded by `supabase db reset` (see [db.seed] in
+-- config.toml). Companion Life has no required seed data — signup provisions
+-- each user's profile and companion automatically (0004_companion.sql) — so
+-- this file intentionally stays empty.

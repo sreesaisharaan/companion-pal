@@ -1,0 +1,159 @@
+{
+  "exported_at": "2026-08-05T10:54:51.677Z",
+  "email": "buffytest1785925070@gmail.com",
+  "data": {
+    "profiles": [
+      {
+        "id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "email": "buffytest1785925070@gmail.com",
+        "display_name": null,
+        "timezone": "UTC",
+        "preferred_currency": "USD",
+        "created_at": "2026-08-05T10:17:50.933978+00:00",
+        "updated_at": "2026-08-05T10:17:50.933978+00:00"
+      }
+    ],
+    "budget_categories": [
+      {
+        "id": "09275f1d-6092-4fbc-9a65-a9dac66888e3",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "name": "Groceries",
+        "color": null,
+        "position": 0,
+        "created_at": "2026-08-05T10:19:54.336518+00:00",
+        "updated_at": "2026-08-05T10:19:54.336518+00:00"
+      },
+      {
+        "id": "f54f0cf1-185f-4055-b73f-4a72f4342815",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "name": "Fun",
+        "color": null,
+        "position": 0,
+        "created_at": "2026-08-05T10:22:52.247879+00:00",
+        "updated_at": "2026-08-05T10:22:52.247879+00:00"
+      }
+    ],
+    "transactions": [
+      {
+        "id": "ed6efcab-74a7-434f-a138-3475dc62df01",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "category_id": "09275f1d-6092-4fbc-9a65-a9dac66888e3",
+        "amount_minor": -1299,
+        "currency": "USD",
+        "note": "Weekly groceries",
+        "occurred_on": "2026-08-05",
+        "created_at": "2026-08-05T10:19:56.181517+00:00",
+        "updated_at": "2026-08-05T10:19:56.181517+00:00"
+      }
+    ],
+    "tasks": [
+      {
+        "id": "e65c59b3-d9f7-45bd-838d-3300db17ee5e",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "list_id": null,
+        "title": "Water the plants",
+        "notes": null,
+        "due_at": null,
+        "completed_at": "2026-08-05T10:29:58.706+00:00",
+        "recurrence": null,
+        "created_at": "2026-08-05T10:28:50.864623+00:00",
+        "updated_at": "2026-08-05T10:29:58.421796+00:00"
+      },
+      {
+        "id": "9825828e-71a2-41da-b496-08310c5eebf5",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "list_id": null,
+        "title": "Go for a walk",
+        "notes": null,
+        "due_at": null,
+        "completed_at": "2026-08-05T10:33:30.808+00:00",
+        "recurrence": null,
+        "created_at": "2026-08-05T10:33:03.308098+00:00",
+        "updated_at": "2026-08-05T10:33:30.307815+00:00"
+      },
+      {
+        "id": "bf6cbd98-67f5-415d-8876-431d15edb37c",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "list_id": null,
+        "title": "Read 10 pages",
+        "notes": null,
+        "due_at": null,
+        "completed_at": "2026-08-05T10:36:51.315+00:00",
+        "recurrence": null,
+        "created_at": "2026-08-05T10:36:50.221393+00:00",
+        "updated_at": "2026-08-05T10:36:50.810165+00:00"
+      },
+      {
+        "id": "87af66f3-018e-44c4-889e-483980c60edb",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "list_id": null,
+        "title": "Take out recycling",
+        "notes": null,
+        "due_at": null,
+        "completed_at": "2026-08-05T10:53:35.323+00:00",
+        "recurrence": "weekly",
+        "created_at": "2026-08-05T10:53:21.686533+00:00",
+        "updated_at": "2026-08-05T10:53:34.8557+00:00"
+      },
+      {
+        "id": "0835eccb-b3b1-4072-a0f0-92a15b9daff9",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "list_id": null,
+        "title": "Take out recycling",
+        "notes": null,
+        "due_at": "2026-08-12T10:53:36.255+00:00",
+        "completed_at": null,
+        "recurrence": "weekly",
+        "created_at": "2026-08-05T10:53:35.744427+00:00",
+        "updated_at": "2026-08-05T10:53:35.744427+00:00"
+      }
+    ],
+    "xp_events": [
+      {
+        "id": "2333cb86-3f3c-4f74-84b4-2ea9f4c267a0",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "source": "task_completion",
+        "amount": 10,
+        "idempotency_key": "task:e65c59b3-d9f7-45bd-838d-3300db17ee5e:completion",
+        "created_at": "2026-08-05T10:30:44.995827+00:00"
+      },
+      {
+        "id": "127b1d36-90d2-4925-9307-efbd1f8475e1",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "source": "task_completion",
+        "amount": 10,
+        "idempotency_key": "task:bf6cbd98-67f5-415d-8876-431d15edb37c:completion",
+        "created_at": "2026-08-05T10:36:52.721836+00:00"
+      },
+      {
+        "id": "0f085e3f-6dee-45d5-837d-07fce7f0851c",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "source": "weekly_review",
+        "amount": 15,
+        "idempotency_key": "weekly_review:2026-32",
+        "created_at": "2026-08-05T10:51:30.428968+00:00"
+      },
+      {
+        "id": "179854df-60c9-4292-ae75-db22f554e0d7",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "source": "task_completion",
+        "amount": 10,
+        "idempotency_key": "task:87af66f3-018e-44c4-889e-483980c60edb:completion",
+        "created_at": "2026-08-05T10:53:36.78249+00:00"
+      }
+    ],
+    "companions": [
+      {
+        "id": "0aaf4170-28dd-4101-8da6-7a348d1879a6",
+        "user_id": "06c18c7d-5ac1-44c7-b271-6e5ed1954e73",
+        "species": "creature",
+        "name": null,
+        "stage": "hatchling",
+        "xp": 45,
+        "quiet_mode": false,
+        "created_at": "2026-08-05T10:17:50.933978+00:00",
+        "updated_at": "2026-08-05T10:53:37.334893+00:00"
+      }
+    ]
+  }
+}

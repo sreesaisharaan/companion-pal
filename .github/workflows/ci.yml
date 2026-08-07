@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Supabase: start a local instance (applies migrations), statically lint the
+  # plpgsql functions, and run the RLS + XP award test suite against it. This
+  # is the only place the SQL tests can run (they need a Postgres instance).
+  # ---------------------------------------------------------------------------
+  supabase:
+    name: Supabase — migrations, lint, RLS tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: supabase
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pinned to the CLI version the db lint flags were validated against
+      # (2.110.0); bump deliberately when changing the workflow.
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: v2.110.0
+
+      # Applies all migrations (0001–0007) and the (empty) seed file.
+      - name: Start local Supabase
+        run: supabase start
+
+      - name: Install psql client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      # plpgsql static analysis of the award RPCs (migration 0007) and
+      # triggers. plpgsql_check is created if the image ships it (non-fatal
+      # otherwise), and the step stays non-blocking so tooling quirks can't
+      # gate the pipeline — the RLS suite below is the real gate.
+      - name: Lint database functions (informational)
+        run: |
+          psql "postgresql://postgres:postgres@localhost:54322/postgres" \
+            -c "create extension if not exists plpgsql_check;" || true
+          supabase db lint --local --fail-on error
+        continue-on-error: true
+
+      # The suite wraps everything in a transaction and RAISEs on the first
+      # failure; ON_ERROR_STOP turns any error into a non-zero exit.
+      - name: Run RLS + XP award test suite
+        run: |
+          psql --set ON_ERROR_STOP=1 \
+            "postgresql://postgres:postgres@localhost:54322/postgres" \
+            -f tests/rls_policies.sql
+
+  # ---------------------------------------------------------------------------
+  # Mobile: TypeScript typecheck and ESLint for the Expo app.
+  # ---------------------------------------------------------------------------
+  mobile:
+    name: Mobile — typecheck + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint

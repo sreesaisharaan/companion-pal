@@ -1,0 +1,102 @@
+// award-xp — server-side XP award for task completion.
+//
+// The client never decides reward amounts. This function verifies the caller's
+// JWT and then delegates the actual award to a database function
+// (award_task_xp / award_weekly_review_xp in migration 0007). Those RPCs run
+// with the service role, serialise per user with a row lock (so the 50 XP/day
+// cap can't be overshot by concurrent completions), and keep the companion's
+// derived XP/stage consistent with the ledger under concurrency. The weekly
+// review has its own once-per-week budget and is excluded from the task cap.
+//
+// Deployment: `supabase db push` (applies the RPCs), then
+// `supabase functions deploy award-xp` (service-role key secret is provisioned
+// automatically).
+
+import { createClient } from 'npm:@supabase/supabase-js@2';
+
+// Browsers preflight cross-origin fetches (the web client calls this function
+// via functions.invoke). The OPTIONS request carries no Authorization header,
+// so it must be answered BEFORE the auth check — otherwise every web client is
+// blocked by CORS and the award silently never lands.
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+  });
+}
+
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') ?? '',
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+  { auth: { persistSession: false } },
+);
+
+/** ISO-8601 week key (e.g. "2026-32") — weekly reviews are unique per week. */
+function isoWeekKey(date: Date): string {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+  return `${d.getUTCFullYear()}-${String(week).padStart(2, '0')}`;
+}
+
+Deno.serve(async (req) => {
+  // 0. Answer CORS preflights before anything else.
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
+  // 1. Identify the caller from their JWT.
+  const authorization = req.headers.get('Authorization');
+  const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : authorization;
+  if (!token) return json({ error: 'missing authorization' }, 401);
+
+  const { data: userData, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !userData.user) return json({ error: 'unauthorized' }, 401);
+  const userId = userData.user.id;
+
+  // 2. Read and validate the payload.
+  let taskId: string | undefined;
+  let source: string | undefined;
+  try {
+    ({ task_id: taskId, source } = await req.json());
+  } catch {
+    return json({ error: 'invalid JSON body' }, 400);
+  }
+
+  // 3. Weekly review path: no task, +15 XP, once per ISO week (idempotent
+  //    server-side, exempt from the task daily cap).
+  if (!taskId && source === 'weekly_review') {
+    const { data, error } = await supabase.rpc('award_weekly_review_xp', {
+      p_user_id: userId,
+      p_idempotency_key: `weekly_review:${isoWeekKey(new Date())}`,
+    });
+    if (error) return json({ error: error.message }, 500);
+    return json(data as object);
+  }
+
+  // 4. Anything else is a task completion — task_id is required.
+  if (typeof taskId !== 'string' || !taskId) {
+    return json({ error: 'task_id is required (or source: weekly_review)' }, 400);
+  }
+
+  const { data, error } = await supabase.rpc('award_task_xp', {
+    p_user_id: userId,
+    p_task_id: taskId,
+  });
+  if (error) return json({ error: error.message }, 500);
+
+  const result = (data ?? {}) as { error?: string };
+  if (result.error) {
+    return json({ error: result.error }, result.error === 'task not found' ? 404 : 400);
+  }
+  return json(result);
+});
