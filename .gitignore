@@ -12,3 +12,12 @@ coverage/
 *.tsbuildinfo
 android/
 ios/
+
+# Freebuff local runtime state
+.freebuff/
+
+# Supabase local CLI state
+supabase/.temp/
+
+# Local Claude settings
+.claude/settings.local.json

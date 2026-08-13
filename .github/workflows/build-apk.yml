@@ -1,0 +1,95 @@
+name: Build Android APK
+
+# Builds a release APK for the Companion Life v1 app without needing an Expo
+# account or EAS cloud build: `expo prebuild` generates the native android/
+# project, then gradle produces an installable release APK which is uploaded
+# as an artifact. Release builds default to the debug keystore (same as EAS
+# "preview" internal builds) so the APK installs on any device; a store upload
+# keystore can be wired in later for Play Store submission.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      # The anon key + URL are public-by-design and inlined into the JS bundle
+      # at build time. Set them as repository secrets
+      # (Settings → Secrets and variables → Actions):
+      #   EXPO_PUBLIC_SUPABASE_URL
+      #   EXPO_PUBLIC_SUPABASE_ANON_KEY
+      # The workflow fails fast if they are missing, because an APK without
+      # backend config would show only the setup screen.
+      EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+      EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Supabase secrets are set
+        run: |
+          if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ] || [ -z "$EXPO_PUBLIC_SUPABASE_ANON_KEY" ]; then
+            echo "::error::Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY secrets. Add them under Settings → Secrets and variables → Actions, then re-run this workflow."
+            exit 1
+          fi
+          echo "Supabase env vars present ✓"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: mobile
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: mobile
+
+      - name: Lint
+        run: npm run lint
+        working-directory: mobile
+
+      # Generates the native android/ project from app.json + config plugins.
+      # --no-install skips npm install of the generated template deps (already
+      # present from npm ci).
+      - name: Prebuild native android project
+        run: npx expo prebuild --platform android --no-install
+        working-directory: mobile
+
+      # assembleRelease inlines the EXPO_PUBLIC_* env vars into the JS bundle
+      # via Metro and signs with the debug keystore (installable APK).
+      - name: Build release APK
+        run: ./gradlew assembleRelease
+        working-directory: mobile/android
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-life-v1-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
