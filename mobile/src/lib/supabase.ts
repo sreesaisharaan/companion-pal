@@ -1,63 +1,38 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
-import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 /**
- * Sessions are persisted in encrypted SecureStore on iOS/Android and in
- * localStorage on web. SecureStore values are capped around 2 KB — Supabase
- * sessions (access JWT + refresh token + user) can exceed that — so oversized
- * values fall back to AsyncStorage rather than silently losing the session.
+ * Sessions are persisted with AsyncStorage, matching the official Supabase
+ * React Native quickstart. We deliberately do not use expo-secure-store here:
+ * Supabase session payloads (access JWT + refresh token + user) routinely
+ * exceed SecureStore's size limits, and on Android its encrypted store has
+ * long-standing bugs where writes fail or reads throw "Could not
+ * encrypt/decrypt the value" (expo/expo#2556, expo/expo#23426) — which
+ * silently signed users out on every cold start. AsyncStorage has no such
+ * limits and persists reliably across app restarts. The refresh token ends up
+ * unencrypted inside the app's private sandbox; that is the standard,
+ * documented tradeoff for Supabase + React Native apps.
  */
+
+// True while a web route is being server-rendered (static web output renders
+// routes in Node). AsyncStorage's web implementation reads window.localStorage
+// directly, which throws here, and no session can exist during SSR anyway — so
+// storage calls become no-ops instead of crashing the render.
+const isSsr = Platform.OS === 'web' && typeof window === 'undefined';
+
+// A thin SSR guard around AsyncStorage; a straight pass-through on native and
+// in the browser. Works on iOS, Android, and web (on web AsyncStorage sits on
+// top of localStorage, so existing web sessions keep working unchanged).
 const storageAdapter = {
-  getItem: async (key: string) => {
-    if (Platform.OS === 'web') {
-      return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
-    }
-    try {
-      const value = await SecureStore.getItemAsync(key);
-      // A successful null means nothing is in SecureStore — a previous setItem
-      // may have fallen back to AsyncStorage (oversized session), so read
-      // there before giving up. Otherwise the session would silently vanish.
-      if (value != null) return value;
-    } catch {
-      // SecureStore read failed; fall through to AsyncStorage.
-    }
-    return AsyncStorage.getItem(key);
-  },
-  setItem: async (key: string, value: string) => {
-    if (Platform.OS === 'web') {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(key, value);
-      }
-      return;
-    }
-    try {
-      await SecureStore.setItemAsync(key, value);
-    } catch {
-      await AsyncStorage.setItem(key, value);
-    }
-  },
-  removeItem: async (key: string) => {
-    if (Platform.OS === 'web') {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.removeItem(key);
-      }
-      return;
-    }
-    try {
-      await SecureStore.deleteItemAsync(key);
-    } catch {
-      // Ignore: nothing persisted under the key.
-    }
-    await AsyncStorage.removeItem(key);
-  },
+  getItem: (key: string) => (isSsr ? null : AsyncStorage.getItem(key)),
+  setItem: (key: string, value: string) => (isSsr ? Promise.resolve() : AsyncStorage.setItem(key, value)),
+  removeItem: (key: string) => (isSsr ? Promise.resolve() : AsyncStorage.removeItem(key)),
 };
 
-/** True when EXPO_PUBLIC_* credentials are present. The app shows a setup screen otherwise. */
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
 function createSupabaseClient() {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { SectionTitle } from '@/components/section-title';
 import { ThemedText } from '@/components/themed-text';
@@ -15,7 +15,7 @@ import { ProgressBar } from '@/components/progress-bar';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { TextField } from '@/components/ui/text-field';
 import { TransactionRow } from '@/components/transaction-row';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useCurrency } from '@/hooks/use-currency';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
@@ -48,6 +48,19 @@ const MONTH_LABEL = new Date().toLocaleDateString(undefined, {
   year: 'numeric',
 });
 
+/**
+ * Strictly parse a money amount: digits with an optional 1–2 decimal places,
+ * a comma accepted as the decimal separator (12,50 → 12.5). Everything else
+ * returns null — a lenient parseFloat would silently accept "12abc" and mangle
+ * thousands separators ("1,234" → 1.234 instead of 1234).
+ */
+function parseAmountText(text: string): number | null {
+  const cleaned = text.replace(',', '.').trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+  const value = Number(cleaned);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 type Kind = 'expense' | 'income';
 
 export default function MoneyScreen() {
@@ -55,6 +68,7 @@ export default function MoneyScreen() {
   const userId = session?.user?.id;
   const theme = useTheme();
   const { formatCurrency } = useCurrency();
+  const insets = useSafeAreaInsets();
 
   const [range, setRange] = useState<MoneyRange>('month');
   const [modalOpen, setModalOpen] = useState(false);
@@ -103,11 +117,14 @@ export default function MoneyScreen() {
     return map;
   }, [budgetsQuery.data, categoryNameById]);
 
-  // Suggested = existing + defaults not yet materialised (deduped by name).
+  // Suggested = existing + defaults not yet materialised, deduped by name —
+  // including duplicates among the EXISTING rows (a corrupt/raced store could
+  // hold two categories with the same name; rendering both would duplicate
+  // rows and collide on React keys).
   const visibleCategories = useMemo(() => {
     const names = new Set(existingCategories.map((category) => category.name));
-    const suggestions = DEFAULT_CATEGORIES.map((category) => category.name);
-    return [...existingCategories.map((category) => category.name), ...suggestions.filter((name) => !names.has(name))];
+    for (const suggestion of DEFAULT_CATEGORIES) names.add(suggestion.name);
+    return [...names];
   }, [existingCategories]);
 
   // Expense magnitudes per category (income is excluded from the bars).
@@ -170,10 +187,9 @@ export default function MoneyScreen() {
   }
 
   function submitForm() {
-    const cleaned = amountText.replace(',', '.').trim();
-    const value = Number.parseFloat(cleaned);
-    if (!Number.isFinite(value) || value <= 0) {
-      setFormError('Enter an amount greater than zero.');
+    const value = parseAmountText(amountText);
+    if (value === null) {
+      setFormError('Enter a valid amount (e.g. 12.50).');
       return;
     }
     setFormError(null);
@@ -210,10 +226,9 @@ export default function MoneyScreen() {
 
   function submitBudget() {
     if (!budgetCategory) return;
-    const cleaned = budgetAmountText.replace(',', '.').trim();
-    const value = Number.parseFloat(cleaned);
-    if (!Number.isFinite(value) || value <= 0) {
-      setBudgetError('Enter a budget greater than zero.');
+    const value = parseAmountText(budgetAmountText);
+    if (value === null) {
+      setBudgetError('Enter a valid budget (e.g. 250.00).');
       return;
     }
     setBudgetError(null);
@@ -238,108 +253,128 @@ export default function MoneyScreen() {
 
   const rangeLabel = RANGES.find((option) => option.value === range)?.label ?? 'This month';
   const dateIsToday = occurredOn === localDateString(new Date());
+  const bottomClearance =
+    (Platform.OS === 'web' ? Spacing.seven + Spacing.five : BottomTabInset) +
+    Spacing.four +
+    insets.bottom;
+
+  const renderTransaction = ({ item }: { item: Transaction }) => (
+    <View
+      style={[
+        styles.rowCard,
+        { backgroundColor: theme.cardSecondary, borderColor: theme.border },
+      ]}>
+      <TransactionRow
+        note={item.note}
+        categoryName={item.category_id ? (categoryNameById.get(item.category_id) ?? null) : null}
+        amountMinor={item.amount_minor}
+        occurredOn={item.occurred_on}
+        // Editing resolves the category name from the loaded categories —
+        // holding it back until they resolve prevents a silent drop of
+        // the transaction's category during the save.
+        onEdit={categoriesQuery.isLoading ? undefined : () => openEdit(item)}
+        onDelete={() => deleteTransaction.mutate(item.id)}
+      />
+    </View>
+  );
 
   return (
-    <Screen tabBar paddedTop>
-      <ScreenHeader
-        eyebrow="Companion Life"
-        title="Money"
-        subtitle={MONTH_LABEL}
-        image={STAGE_META[(companion.data ?? DEFAULT_COMPANION).stage].image}
-      />
-
-      {/* Net total — the ONE light hero card on this screen */}
-      <Card variant="primary" elevated>
-        <ThemedText type="smallBold" themeColor="textSecondary" style={styles.totalLabel}>
-          {range === 'all' ? 'Net, all time' : `Net this ${range === 'week' ? 'week' : 'month'}`}
-        </ThemedText>
-        <View style={styles.totalRow}>
-          <ThemedText type="title" style={styles.total}>
-            {formatCurrency(total)}
-          </ThemedText>
-          <Chip
-            label={`${transactions.length} ${transactions.length === 1 ? 'transaction' : 'transactions'}`}
-            selected
-          />
-        </View>
-        <ThemedText type="small" themeColor="textSecondary">
-          {transactions.length === 0
-            ? 'Add your first transaction — totals update the moment you save one.'
-            : 'Expenses count down, income counts up. No judgment, just visibility.'}
-        </ThemedText>
-      </Card>
-
-      <CTAButton label="＋ Add transaction" onPress={openCreate} fullWidth />
-
-      <SegmentedControl options={RANGES} value={range} onChange={(v) => setRange(v ?? 'month')} />
-
-      {/* Category breakdown */}
-      <SectionTitle>Categories</SectionTitle>
-      <Card style={{ gap: Spacing.four }}>
-        {categoryRows.length === 0 && otherSpend === 0 ? (
-          <ThemedText type="small" themeColor="textSecondary">
-            No spending in this range yet — record a transaction above to see where money goes.
-          </ThemedText>
-        ) : (
-          <>
-            {categoryRows.map((row) => (
-              <CategoryBar
-                key={row.name}
-                emoji={row.emoji}
-                name={row.name}
-                spend={row.spend}
-                maxSpend={maxSpend}
-                budget={budgetByCategoryName.get(row.name) ?? null}
-                onSetBudget={() => openBudget(row.name)}
-              />
-            ))}
-            {otherSpend > 0 ? (
-              <CategoryBar emoji={categoryEmoji(null)} name="Other" spend={otherSpend} maxSpend={maxSpend} />
-            ) : null}
-          </>
-        )}
-      </Card>
-
-      {/* Transaction list */}
-      <SectionTitle>Transactions</SectionTitle>
-      {transactionsQuery.isLoading ? (
-        <Card>
-          <ThemedText type="small" themeColor="textSecondary">
-            Loading your transactions…
-          </ThemedText>
-        </Card>
-      ) : transactionsQuery.isError ? (
-        <Card style={{ gap: Spacing.three }}>
-          <ThemedText type="smallBold">Couldn’t load your transactions.</ThemedText>
-          <Button label="Try again" variant="secondary" onPress={() => transactionsQuery.refetch()} fullWidth />
-        </Card>
-      ) : transactions.length === 0 ? (
-        <Card style={{ gap: Spacing.two }}>
-          <ThemedText type="smallBold">Nothing here yet</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {range === 'all'
-              ? 'No transactions recorded. Tap “Add transaction” to log your first one.'
-              : `No transactions in ${rangeLabel.toLowerCase()}. Switch to “All time” to see everything.`}
-          </ThemedText>
-        </Card>
-      ) : (
-        <Card style={{ gap: Spacing.four }}>
-          {transactions.map((tx) => (
-            <TransactionRow
-              key={tx.id}
-              note={tx.note}
-              categoryName={tx.category_id ? (categoryNameById.get(tx.category_id) ?? null) : null}
-              amountMinor={tx.amount_minor}
-              occurredOn={tx.occurred_on}
-              // Editing resolves the category name from the loaded categories —
-              // holding it back until they resolve prevents a silent drop of
-              // the transaction's category during the save.
-              onEdit={categoriesQuery.isLoading ? undefined : () => openEdit(tx)}
-              onDelete={() => deleteTransaction.mutate(tx.id)}
+    <>
+      <FlatList
+        style={{ backgroundColor: theme.background }}
+        data={transactions.length > 0 ? transactions : []}
+        keyExtractor={(tx) => tx.id}
+        renderItem={renderTransaction}
+        ItemSeparatorComponent={() => <View style={styles.rowSeparator} />}
+        contentContainerStyle={styles.listContent}
+        contentInset={{ top: insets.top, bottom: bottomClearance }}
+        ListHeaderComponent={
+          <View style={styles.pageContent}>
+            <ScreenHeader
+              eyebrow="Companion Life"
+              title="Money"
+              subtitle={MONTH_LABEL}
+              image={STAGE_META[(companion.data ?? DEFAULT_COMPANION).stage].image}
             />
-          ))}
-        </Card>
-      )}
+
+            {/* Net total — the ONE light hero card on this screen */}
+            <Card variant="primary" elevated>
+              <ThemedText type="smallBold" themeColor="textSecondary" style={styles.totalLabel}>
+                {range === 'all' ? 'Net, all time' : `Net this ${range === 'week' ? 'week' : 'month'}`}
+              </ThemedText>
+              <View style={styles.totalRow}>
+                <ThemedText type="title" style={styles.total}>
+                  {formatCurrency(total)}
+                </ThemedText>
+                <Chip
+                  label={`${transactions.length} ${transactions.length === 1 ? 'transaction' : 'transactions'}`}
+                  selected
+                />
+              </View>
+              <ThemedText type="small" themeColor="textSecondary">
+                {transactions.length === 0
+                  ? 'Add your first transaction — totals update the moment you save one.'
+                  : 'Expenses count down, income counts up. No judgment, just visibility.'}
+              </ThemedText>
+            </Card>
+
+            <CTAButton label="＋ Add transaction" onPress={openCreate} fullWidth />
+
+            <SegmentedControl options={RANGES} value={range} onChange={(v) => setRange(v ?? 'month')} />
+
+            {/* Category breakdown */}
+            <SectionTitle>Categories</SectionTitle>
+            <Card style={{ gap: Spacing.four }}>
+              {categoryRows.length === 0 && otherSpend === 0 ? (
+                <ThemedText type="small" themeColor="textSecondary">
+                  No spending in this range yet — record a transaction above to see where money goes.
+                </ThemedText>
+              ) : (
+                <>
+                  {categoryRows.map((row) => (
+                    <CategoryBar
+                      key={row.name}
+                      emoji={row.emoji}
+                      name={row.name}
+                      spend={row.spend}
+                      maxSpend={maxSpend}
+                      budget={budgetByCategoryName.get(row.name) ?? null}
+                      onSetBudget={() => openBudget(row.name)}
+                    />
+                  ))}
+                  {otherSpend > 0 ? (
+                    <CategoryBar emoji={categoryEmoji(null)} name="Other" spend={otherSpend} maxSpend={maxSpend} />
+                  ) : null}
+                </>
+              )}
+            </Card>
+
+            {/* Transaction list */}
+            <SectionTitle>Transactions</SectionTitle>
+            {transactionsQuery.isLoading ? (
+              <Card>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Loading your transactions…
+                </ThemedText>
+              </Card>
+            ) : transactionsQuery.isError ? (
+              <Card style={{ gap: Spacing.three }}>
+                <ThemedText type="smallBold">Couldn’t load your transactions.</ThemedText>
+                <Button label="Try again" variant="secondary" onPress={() => transactionsQuery.refetch()} fullWidth />
+              </Card>
+            ) : transactions.length === 0 ? (
+              <Card style={{ gap: Spacing.two }}>
+                <ThemedText type="smallBold">Nothing here yet</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {range === 'all'
+                    ? 'No transactions recorded. Tap “Add transaction” to log your first one.'
+                    : `No transactions in ${rangeLabel.toLowerCase()}. Switch to “All time” to see everything.`}
+                </ThemedText>
+              </Card>
+            ) : null}
+          </View>
+        }
+      />
 
       {/* Budget bottom sheet */}
       <Modal
@@ -502,7 +537,7 @@ export default function MoneyScreen() {
           </View>
         </View>
       </Modal>
-    </Screen>
+    </>
   );
 }
 
@@ -525,8 +560,9 @@ function CategoryBar({
   const { formatCurrency } = useCurrency();
   const pct = maxSpend > 0 ? Math.max((spend / maxSpend) * 100, spend > 0 ? 8 : 0) : 0;
 
-  const over = budget != null && spend > budget;
-  const budgetPct = budget != null ? Math.min((spend / budget) * 100, 100) : 0;
+  // A zero/absent budget means no cap — guard so the fill never divides by 0.
+  const over = budget != null && budget > 0 && spend > budget;
+  const budgetPct = budget != null && budget > 0 ? Math.min((spend / budget) * 100, 100) : 0;
 
   // Category bars live on dark secondary cards — the fill is the on-fill ink
   // (onSecondary, which stays light in both schemes).
@@ -658,5 +694,31 @@ const styles = StyleSheet.create({
   },
   dateLabel: {
     flex: 1,
+  },
+  /** Vertical rhythm + width cap for the fixed header content above the list. */
+  pageContent: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.four,
+    gap: Spacing.three,
+    paddingTop: Spacing.six,
+  },
+  /** The virtualized transaction list itself — capped to the page width. */
+  listContent: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignSelf: 'center',
+    flexGrow: 1,
+    paddingHorizontal: Spacing.four,
+  },
+  rowCard: {
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
+  },
+  rowSeparator: {
+    height: Spacing.two,
   },
 });

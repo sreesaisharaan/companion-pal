@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { weekReviewKey } from '@/lib/api/review';
 import { requireSupabase } from '@/lib/supabase';
@@ -17,6 +18,71 @@ export type Task = {
 export const todayTasksKey = ['tasks', 'today'] as const;
 export const completedTodayKey = ['tasks', 'completed-today'] as const;
 export const upcomingTasksKey = ['tasks', 'upcoming'] as const;
+export const taskListsKey = ['task-lists'] as const;
+
+export type TaskList = {
+  id: string;
+  user_id: string;
+  name: string;
+  position: number;
+  created_at: string;
+};
+
+/** The user's task lists, in display order. */
+export function useTaskLists(userId: string | undefined) {
+  return useQuery({
+    queryKey: [...taskListsKey, userId],
+    enabled: !!userId,
+    queryFn: async () => {
+      const db = requireSupabase();
+      const { data, error } = await db
+        .from('task_lists')
+        .select('*')
+        .eq('user_id', userId as string)
+        .order('position', { ascending: true })
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as TaskList[];
+    },
+  });
+}
+
+/**
+ * Get-or-create a task list by name (mirrors resolveCategoryId: a concurrent
+ * create can hit the unique (user_id, name) index, so re-read on 23505).
+ */
+async function resolveListId(
+  db: SupabaseClient,
+  userId: string,
+  name: string,
+): Promise<string> {
+  const { data: existing } = await db
+    .from('task_lists')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('name', name)
+    .maybeSingle();
+  if (existing) return existing.id;
+  const { data: created, error } = await db
+    .from('task_lists')
+    .insert({ user_id: userId, name })
+    .select('id')
+    .maybeSingle();
+  if (error) {
+    if (error.code === '23505') {
+      const { data: raced } = await db
+        .from('task_lists')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('name', name)
+        .maybeSingle();
+      if (raced) return raced.id;
+    }
+    throw error;
+  }
+  if (!created) throw new Error('Could not resolve the list.');
+  return created.id;
+}
 
 /** Start of the local calendar day (used to split today vs overdue). */
 export function startOfToday(): Date {
@@ -115,18 +181,30 @@ export type CreateTaskInput = {
   dueAt: string | null;
   /** 'daily' | 'weekly' | 'monthly', or null for a one-off. */
   recurrence?: string | null;
+  /** Free-form notes, or null for none. */
+  notes?: string | null;
+  /** Get-or-create a task list by name; null leaves the task unlisted. */
+  listName?: string | null;
 };
 
 export function useCreateTask(userId: string | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ title, dueAt, recurrence }: CreateTaskInput) => {
+    mutationFn: async ({ title, dueAt, recurrence, notes, listName }: CreateTaskInput) => {
       if (!userId) throw new Error('Not signed in');
       const db = requireSupabase();
+      const listId = listName ? await resolveListId(db, userId, listName) : null;
       const { data, error } = await db
         .from('tasks')
-        .insert({ user_id: userId, title: title.trim(), due_at: dueAt, recurrence: recurrence ?? null })
+        .insert({
+          user_id: userId,
+          title: title.trim(),
+          due_at: dueAt,
+          recurrence: recurrence ?? null,
+          notes: notes?.trim() || null,
+          list_id: listId,
+        })
         .select()
         .single();
       if (error) throw error;
@@ -134,6 +212,8 @@ export function useCreateTask(userId: string | undefined) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: todayTasksKey });
+      // A new list may have been materialised by the get-or-create.
+      queryClient.invalidateQueries({ queryKey: taskListsKey });
     },
   });
 }
@@ -246,14 +326,18 @@ export type UpdateTaskInput = {
   dueAt?: string | null;
   /** 'daily' | 'weekly' | 'monthly', or null to make it a one-off. */
   recurrence?: string | null;
+  /** Free-form notes; null clears them. */
+  notes?: string | null;
+  /** Get-or-create a task list by name; null removes the task from its list. */
+  listName?: string | null;
 };
 
 /**
- * Edit an existing task (title, due date, repeat). Only the provided fields
- * are changed; returns the saved row. A due-date change is what drives the
- * reminder reschedule on the Today screen.
+ * Edit an existing task (title, due date, repeat, notes, list). Only the
+ * provided fields are changed; returns the saved row. A due-date change is
+ * what drives the reminder reschedule on the Today screen.
  */
-export function useUpdateTask() {
+export function useUpdateTask(userId: string | undefined) {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -262,12 +346,19 @@ export function useUpdateTask() {
       title,
       dueAt,
       recurrence,
+      notes,
+      listName,
     }: UpdateTaskInput & { taskId: string }) => {
       const db = requireSupabase();
       const patch: Record<string, unknown> = {};
       if (title !== undefined) patch.title = title.trim();
       if (dueAt !== undefined) patch.due_at = dueAt;
       if (recurrence !== undefined) patch.recurrence = recurrence;
+      if (notes !== undefined) patch.notes = notes?.trim() || null;
+      if (listName !== undefined) {
+        if (!userId) throw new Error('Not signed in');
+        patch.list_id = listName ? await resolveListId(db, userId, listName) : null;
+      }
       const { data, error } = await db
         .from('tasks')
         .update(patch)
@@ -281,6 +372,8 @@ export function useUpdateTask() {
       // An edited task can move between Next up and Upcoming.
       queryClient.invalidateQueries({ queryKey: todayTasksKey });
       queryClient.invalidateQueries({ queryKey: upcomingTasksKey });
+      // A new list may have been materialised by the get-or-create.
+      queryClient.invalidateQueries({ queryKey: taskListsKey });
     },
   });
 }

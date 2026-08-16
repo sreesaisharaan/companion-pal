@@ -234,8 +234,22 @@ async function resolveCategoryId(
     .from('budget_categories')
     .insert({ user_id: userId, name })
     .select('id')
-    .single();
-  if (error) throw error;
+    .maybeSingle();
+  if (error) {
+    // Unique violation (Postgres 23505): a concurrent get-or-create won the
+    // race, so re-read the row the other caller created instead of failing.
+    if (error.code === '23505') {
+      const { data: raced } = await db
+        .from('budget_categories')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('name', name)
+        .maybeSingle();
+      if (raced) return raced.id;
+    }
+    throw error;
+  }
+  if (!created) throw new Error('Could not resolve the category.');
   return created.id;
 }
 
@@ -306,6 +320,9 @@ export function formatMoney(amountMinor: number, currency: string): string {
 /** "Today", "Yesterday", or a short weekday date. */
 export function formatDayLabel(dateStr: string): string {
   const date = new Date(`${dateStr}T00:00:00`);
+  // Guard against a corrupt occurred_on: an invalid Date would throw inside
+  // toLocaleDateString and red-screen the list. Show the raw value instead.
+  if (Number.isNaN(date.getTime())) return dateStr;
   const today = new Date();
   const dayDiff = Math.round(
     (new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime() -

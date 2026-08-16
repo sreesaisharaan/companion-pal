@@ -6,25 +6,22 @@ import { SectionTitle } from '@/components/section-title';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Card } from '@/components/ui/card';
-import { Chip } from '@/components/ui/chip';
 import { CTAButton } from '@/components/ui/cta-button';
 import { Radius, Spacing } from '@/constants/theme';
 import { useCurrency } from '@/hooks/use-currency';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth-context';
 import { DEFAULT_COMPANION, STAGE_META, useCompanion } from '@/lib/api/companion';
+import { startOfWeek } from '@/lib/api/money';
 import { EMPTY_STATS, useCompleteWeeklyReview, useWeekReview } from '@/lib/api/review';
+import { useTaskLists } from '@/lib/api/tasks';
 
-const WEEK_LABEL = new Date().toLocaleDateString(undefined, {
+/** The review week's Monday — the stats below cover Monday → now, so the
+ * label must show the week's start, not today's date. */
+const WEEK_LABEL = startOfWeek().toLocaleDateString(undefined, {
   month: 'long',
   day: 'numeric',
 });
-
-const PLANNED_LISTS = [
-  { name: 'Errands', count: '5 tasks' },
-  { name: 'Study', count: '3 tasks' },
-  { name: 'Life admin', count: '2 tasks' },
-];
 
 export default function PlanScreen() {
   const { session } = useAuth();
@@ -35,6 +32,7 @@ export default function PlanScreen() {
   const weekReview = useWeekReview(userId);
   const completeReview = useCompleteWeeklyReview();
   const companion = useCompanion(userId);
+  const taskLists = useTaskLists(userId);
 
   const stats = weekReview.data ?? EMPTY_STATS;
   const reviewed = stats.reviewed;
@@ -103,20 +101,35 @@ export default function PlanScreen() {
       </Card>
 
       <SectionTitle>Your lists</SectionTitle>
-      <Card style={{ gap: Spacing.three }}>
-        {PLANNED_LISTS.map((list) => (
-          <View key={list.name} style={styles.listRow}>
-            <ThemedView type="backgroundSelected" style={styles.listDot} />
-            <View style={styles.listCopy}>
-              <ThemedText type="smallBold">{list.name}</ThemedText>
-              <ThemedText type="small" themeColor="textSecondary">
-                {list.count}
-              </ThemedText>
+      {taskLists.isLoading ? (
+        <Card>
+          <ThemedText type="small" themeColor="textSecondary">
+            Loading your lists…
+          </ThemedText>
+        </Card>
+      ) : (taskLists.data ?? []).length === 0 ? (
+        <Card style={{ gap: Spacing.three }}>
+          <ThemedText type="smallBold">No lists yet</ThemedText>
+          <ThemedText type="small" themeColor="textSecondary">
+            Pick a list when capturing a task on Today — your lists appear here, and tasks group
+            under them.
+          </ThemedText>
+        </Card>
+      ) : (
+        <Card style={{ gap: Spacing.three }}>
+          {(taskLists.data ?? []).map((list) => (
+            <View key={list.id} style={styles.listRow}>
+              <ThemedView type="backgroundSelected" style={styles.listDot} />
+              <View style={styles.listCopy}>
+                <ThemedText type="smallBold">{list.name}</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Tasks here appear grouped under “{list.name}” on Today.
+                </ThemedText>
+              </View>
             </View>
-          </View>
-        ))}
-        <Chip label="Lists are next — tasks carry their own due + repeat for now" />
-      </Card>
+          ))}
+        </Card>
+      )}
 
       <SectionTitle>Repeating reminders</SectionTitle>
       <Card style={{ gap: Spacing.two }}>

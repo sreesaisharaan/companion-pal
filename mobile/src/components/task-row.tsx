@@ -9,6 +9,10 @@ import { useTheme } from '@/hooks/use-theme';
 type TaskRowProps = {
   title: string;
   dueAt: string | null;
+  /** Task list name, shown as a muted prefix on the meta line. */
+  listName?: string | null;
+  /** Free-form notes, shown as a muted second line under the meta. */
+  notes?: string | null;
   completed?: boolean;
   completedAt?: string | null;
   onToggle?: () => void;
@@ -22,6 +26,9 @@ type TaskRowProps = {
 export function formatDueLabel(dueAt: string | null): string | null {
   if (!dueAt) return null;
   const due = new Date(dueAt);
+  // Guard against a corrupt due_at (same as dueChoiceForDueAt/sameDueDay): an
+  // invalid Date makes toLocaleTimeString throw and would red-screen the list.
+  if (Number.isNaN(due.getTime())) return null;
   const now = new Date();
   const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
@@ -35,7 +42,7 @@ export function formatDueLabel(dueAt: string | null): string | null {
   return `${date} · ${time}`;
 }
 
-export function TaskRow({ title, dueAt, completed, completedAt, onToggle, onEdit, onDelete }: TaskRowProps) {
+export function TaskRow({ title, dueAt, listName, notes, completed, completedAt, onToggle, onEdit, onDelete }: TaskRowProps) {
   const theme = useTheme();
   const [confirming, setConfirming] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,12 +54,15 @@ export function TaskRow({ title, dueAt, completed, completedAt, onToggle, onEdit
     [],
   );
 
+  const completedTime = completedAt ? new Date(completedAt) : null;
   const meta = completed
     ? completedAt
-      ? `Done · ${new Date(completedAt).toLocaleTimeString(undefined, {
-          hour: 'numeric',
-          minute: '2-digit',
-        })}`
+      ? completedTime && !Number.isNaN(completedTime.getTime())
+        ? `Done · ${completedTime.toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit',
+          })}`
+        : 'Done'
       : 'Done'
     : formatDueLabel(dueAt);
 
@@ -87,7 +97,17 @@ export function TaskRow({ title, dueAt, completed, completedAt, onToggle, onEdit
       </ThemedText>
       {meta ? (
         <ThemedText type="small" themeColor="textSecondary">
+          {listName ? `${listName} · ` : ''}
           {meta}
+        </ThemedText>
+      ) : listName ? (
+        <ThemedText type="small" themeColor="textSecondary">
+          {listName}
+        </ThemedText>
+      ) : null}
+      {notes ? (
+        <ThemedText type="small" themeColor="textSecondary" numberOfLines={2}>
+          {notes}
         </ThemedText>
       ) : null}
     </>

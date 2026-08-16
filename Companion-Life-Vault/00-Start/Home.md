@@ -25,7 +25,7 @@
 Phase 1 is in progress. Completed so far:
 
 - **App shell** — Expo SDK 57 + Expo Router + TypeScript scaffolded in `mobile/` with the five tabs (Today, Plan, Money, Companion, Profile) and a warm design system (`src/constants/theme.ts`).
-- **Auth wiring** — Supabase client with SecureStore persistence, sign-in/sign-up screen, and session-gated navigation (`src/lib/`). Works headless until credentials are added.
+- **Auth wiring** — Supabase client with AsyncStorage persistence, sign-in/sign-up screen, and session-gated navigation (`src/lib/`). Works headless until credentials are added.
 - **Data schema + RLS** — migrations in `supabase/migrations/` (profiles, tasks/occurrences/reminders, money, companion/XP) with per-user policies and a signup provisioning trigger.
 - **RLS tests** — `supabase/tests/rls_policies.sql` (run in the Supabase SQL editor).
 
@@ -50,7 +50,7 @@ Hardening slice landed 2026-08-05:
 - **Offline/reconnect resilience** — queries pause offline and refetch on reconnect/window-focus; XP idempotency proven by re-invoking the review (already_awarded, XP unchanged).
 - **Monthly budget indicators** — per-category monthly caps on the Money screen (set/edit/remove, upsert on `unique(user_id, category_id, month)`), progress bars on category rows, and an over-budget state ("over by $X", bold emphasis). Verified live: set $100, progress bar rendered, over-budget triggered, reset to demo state.
 - **RLS test suite executed against the cloud project** — all 7 assertion groups verified live (XP-farm rejection, XP-bump rejection, money constraints, cross-user 403). Two portability bugs fixed in the suite: pgcrypto now schema-qualified (`extensions.gen_salt/crypt`), and test users now created via `auth.users` (the signup trigger provisions profiles) instead of orphaned profile inserts.
-- **Local notifications (the “remind” step)** — `expo-notifications` wired: capture with a due date schedules a 9:00 AM local reminder (recorded in the `reminders` table with the device notification id via migration 0005), completing a task cancels it and marks the row delivered/acknowledged, recurring spawns schedule their next occurrence, and Profile has a real opt-in toggle with permission handling. Native-only by design — web shows a note and the Today screen stays the reminder. Scheduling verified end-to-end in code; final fire/cancel verification needs a real device.
+- **Local notifications (the “remind” step)** — `expo-notifications` wired: capture with a due date schedules a 9:00 AM local reminder (recorded in the `reminders` table with the device notification id via migration 0005), completing a task cancels it and marks the row delivered/acknowledged, recurring spawns schedule their next occurrence, and Profile has a real opt-in toggle with permission handling. Native-only by design — web shows a note and the Today screen stays the reminder. Scheduling verified end-to-end in code; final fire/cancel verification needs a real device. Note: on Android, expo-notifications was removed from Expo Go in SDK 53 (requiring it throws), so the app now detects Expo Go and runs with notifications unavailable — the in-app screens remain the reminder. Test reminders in a development build.
 
 ## Phase 4 status (launch & learn)
 

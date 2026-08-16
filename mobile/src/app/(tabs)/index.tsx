@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import { FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProgressBar } from '@/components/progress-bar';
-import { Screen } from '@/components/screen';
 import { ScreenHeader } from '@/components/screen-header';
 import { SectionTitle } from '@/components/section-title';
 import { formatDueLabel, TaskRow } from '@/components/task-row';
@@ -17,7 +17,7 @@ import { CTAButton } from '@/components/ui/cta-button';
 import { IconButton } from '@/components/ui/icon-button';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import { TextField } from '@/components/ui/text-field';
-import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useCurrency, currencySymbol } from '@/hooks/use-currency';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -41,6 +41,7 @@ import {
   useCompletedToday,
   useCreateTask,
   useDeleteTask,
+  useTaskLists,
   useTodayTasks,
   useUncompleteTask,
   useUpdateTask,
@@ -64,6 +65,25 @@ const REPEAT_CHOICES: { value: RepeatChoice; label: string }[] = [
   { value: 'weekly', label: 'Weekly' },
   { value: 'monthly', label: 'Monthly' },
 ];
+
+/** Suggested lists offered in the picker; materialised via get-or-create. */
+const LIST_PRESETS = ['Errands', 'Study', 'Life admin'] as const;
+
+type ListChoice = 'none' | string;
+
+/**
+ * List options for the capture/edit pickers: No list + the user's existing
+ * lists, with the presets filled in (deduped by name, like visibleCategories).
+ */
+function listOptions(lists: { name: string }[]): { value: ListChoice; label: string }[] {
+  const names = new Set<string>();
+  for (const list of lists) names.add(list.name);
+  for (const preset of LIST_PRESETS) names.add(preset);
+  return [
+    { value: 'none', label: 'No list' },
+    ...[...names].map((name) => ({ value: name, label: name })),
+  ];
+}
 
 function dueAtForChoice(choice: DueChoice): string | null {
   if (choice === 'none') return null;
@@ -112,27 +132,44 @@ export default function TodayScreen() {
   const { formatCurrency, currency } = useCurrency();
   const queryClient = useQueryClient();
 
+  const insets = useSafeAreaInsets();
+
   const todayTasks = useTodayTasks(userId);
   const upcomingTasks = useUpcomingTasks(userId);
   const completedToday = useCompletedToday(userId);
   const companion = useCompanion(userId);
   const monthTotal = useMonthTotal(userId);
+  const taskLists = useTaskLists(userId);
   const createTask = useCreateTask(userId);
   const completeTask = useCompleteTask();
   const uncompleteTask = useUncompleteTask();
-  const updateTask = useUpdateTask();
+  const updateTask = useUpdateTask(userId);
   const deleteTask = useDeleteTask();
 
   const [title, setTitle] = useState('');
+  const [notes, setNotes] = useState('');
   const [due, setDue] = useState<DueChoice>('none');
   const [repeat, setRepeat] = useState<RepeatChoice>('none');
+  const [listChoice, setListChoice] = useState<ListChoice>('none');
   const [captureError, setCaptureError] = useState<string | null>(null);
 
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editNotes, setEditNotes] = useState('');
   const [editDue, setEditDue] = useState<DueChoice | null>('none');
   const [editRepeat, setEditRepeat] = useState<RepeatChoice>('none');
+  const [editList, setEditList] = useState<ListChoice>('none');
   const [editError, setEditError] = useState<string | null>(null);
+
+  // List names by id — used to label rows and seed the edit picker.
+  const listNameById = useMemo(
+    () => new Map((taskLists.data ?? []).map((list) => [list.id, list.name])),
+    [taskLists.data],
+  );
+  const listPickerOptions = useMemo(
+    () => listOptions(taskLists.data ?? []),
+    [taskLists.data],
+  );
 
   const companionData = companion.data ?? DEFAULT_COMPANION;
   const progress = stageProgress(companionData);
@@ -154,12 +191,20 @@ export default function TodayScreen() {
     }
     setCaptureError(null);
     createTask.mutate(
-      { title, dueAt: dueAtForChoice(due), recurrence: repeat === 'none' ? null : repeat },
+      {
+        title,
+        dueAt: dueAtForChoice(due),
+        recurrence: repeat === 'none' ? null : repeat,
+        notes: notes || null,
+        listName: listChoice === 'none' ? null : listChoice,
+      },
       {
         onSuccess: (task) => {
           setTitle('');
+          setNotes('');
           setDue('none');
           setRepeat('none');
+          setListChoice('none');
           // The remind step: a due task schedules a gentle local notification
           // (native only; web is a no-op). Never blocks the capture flow.
           if (userId && task.due_at) {
@@ -179,12 +224,14 @@ export default function TodayScreen() {
   function openEdit(task: Task) {
     setEditingTask(task);
     setEditTitle(task.title);
+    setEditNotes(task.notes ?? '');
     setEditDue(dueChoiceForDueAt(task.due_at));
     setEditRepeat(
       task.recurrence === 'daily' || task.recurrence === 'weekly' || task.recurrence === 'monthly'
         ? task.recurrence
         : 'none',
     );
+    setEditList(task.list_id ? (listNameById.get(task.list_id) ?? 'none') : 'none');
     setEditError(null);
   }
 
@@ -204,7 +251,14 @@ export default function TodayScreen() {
     const newDueAt = editDue === null ? task.due_at : dueAtForChoice(editDue);
     const newRecurrence = editRepeat === 'none' ? null : editRepeat;
     updateTask.mutate(
-      { taskId: task.id, title: editTitle, dueAt: newDueAt, recurrence: newRecurrence },
+      {
+        taskId: task.id,
+        title: editTitle,
+        dueAt: newDueAt,
+        recurrence: newRecurrence,
+        notes: editNotes || null,
+        listName: editList === 'none' ? null : editList,
+      },
       {
         onSuccess: (updated) => {
           setEditingTask(null);
@@ -287,13 +341,69 @@ export default function TodayScreen() {
     });
   }
 
+  const openTasks = useMemo(() => todayTasks.data ?? [], [todayTasks.data]);
+  const bottomClearance =
+    (Platform.OS === 'web' ? Spacing.seven + Spacing.five : BottomTabInset) +
+    Spacing.four +
+    insets.bottom;
+
+  // The Next-up list grouped by task list, preserving the query's due-date
+  // order. Unlisted runs have no headers; each listed run gets one header.
+  type TaskListItem = { type: 'task'; task: Task } | { type: 'listHeader'; name: string };
+  const taskItems = useMemo(() => {
+    const items: TaskListItem[] = [];
+    let currentList: string | null = null;
+    for (const task of openTasks) {
+      const listName = task.list_id ? (listNameById.get(task.list_id) ?? null) : null;
+      if (listName && listName !== currentList) items.push({ type: 'listHeader', name: listName });
+      currentList = listName;
+      items.push({ type: 'task', task });
+    }
+    return items;
+  }, [openTasks, listNameById]);
+
+  const renderTaskItem = ({ item }: { item: TaskListItem }) => {
+    if (item.type === 'listHeader') {
+      return <SectionTitle>{item.name}</SectionTitle>;
+    }
+    const task = item.task;
+    const listName = task.list_id ? (listNameById.get(task.list_id) ?? null) : null;
+    return (
+      <View
+        style={[
+          styles.rowCard,
+          { backgroundColor: theme.cardSecondary, borderColor: theme.border },
+        ]}>
+        <TaskRow
+          title={task.title}
+          dueAt={task.due_at}
+          listName={listName}
+          notes={task.notes}
+          onToggle={() => toggleComplete(task)}
+          onEdit={() => openEdit(task)}
+          onDelete={() => removeTask(task)}
+        />
+      </View>
+    );
+  };
+
   return (
-    <Screen tabBar paddedTop>
-      <ScreenHeader
-        eyebrow="Companion Life"
-        title="Today"
-        subtitle={`Hi, ${firstName}! · ${dateLabel}`}
-      />
+    <>
+      <FlatList
+        style={{ backgroundColor: theme.background }}
+        data={taskItems}
+        keyExtractor={(item) => (item.type === 'task' ? `task-${item.task.id}` : `list-${item.name}`)}
+        renderItem={renderTaskItem}
+        ItemSeparatorComponent={() => <View style={styles.rowSeparator} />}
+        contentContainerStyle={styles.listContent}
+        contentInset={{ top: insets.top, bottom: bottomClearance }}
+        ListHeaderComponent={
+          <View style={styles.pageContent}>
+            <ScreenHeader
+              eyebrow="Companion Life"
+              title="Today"
+              subtitle={`Hi, ${firstName}! · ${dateLabel}`}
+            />
 
       {/* Companion check-in — the ONE light hero card on this screen */}
       <Card variant="primary" elevated style={styles.hero}>
@@ -340,107 +450,118 @@ export default function TodayScreen() {
           value={repeat}
           onChange={(v) => setRepeat(v ?? 'none')}
         />
+        <TextField
+          label="Notes (optional)"
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="e.g. Call before 5 PM"
+        />
+        <SegmentedControl
+          options={listPickerOptions}
+          value={listChoice}
+          onChange={(v) => setListChoice(v ?? 'none')}
+          wrap
+        />
         {captureError ? <ThemedText type="smallBold">{captureError}</ThemedText> : null}
         <CTAButton label="Add task" onPress={submitCapture} loading={createTask.isPending} fullWidth />
       </Card>
 
-      {/* Open tasks */}
-      <SectionTitle>Next up</SectionTitle>
-      {todayTasks.isLoading ? (
-        <Card>
-          <ThemedText type="small" themeColor="textSecondary">
-            Loading your day…
-          </ThemedText>
-        </Card>
-      ) : todayTasks.isError ? (
-        <Card>
-          <ThemedText type="smallBold">Couldn’t load your tasks.</ThemedText>
-          <Button label="Try again" variant="secondary" onPress={() => todayTasks.refetch()} fullWidth />
-        </Card>
-      ) : (todayTasks.data ?? []).length === 0 ? (
-        <Card style={{ gap: Spacing.three }}>
-          <ThemedView type="backgroundSelected" style={styles.emptyIllustration}>
-            <ThemedText style={styles.emptyEmoji}>🌱</ThemedText>
-          </ThemedView>
-          <ThemedText type="smallBold">A quiet, gentle start</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            Capture your first task above — it will appear here, ready to complete. Completing it
-            earns XP for your companion.
-          </ThemedText>
-        </Card>
-      ) : (
-        <Card style={{ gap: Spacing.four }}>
-          {(todayTasks.data ?? []).map((task) => (
-            <TaskRow
-              key={task.id}
-              title={task.title}
-              dueAt={task.due_at}
-              onToggle={() => toggleComplete(task)}
-              onEdit={() => openEdit(task)}
-              onDelete={() => removeTask(task)}
-            />
-          ))}
-        </Card>
-      )}
+            {/* Open tasks */}
+            <SectionTitle>Next up</SectionTitle>
+            {todayTasks.isLoading ? (
+              <Card>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Loading your day…
+                </ThemedText>
+              </Card>
+            ) : todayTasks.isError ? (
+              <Card>
+                <ThemedText type="smallBold">Couldn’t load your tasks.</ThemedText>
+                <Button label="Try again" variant="secondary" onPress={() => todayTasks.refetch()} fullWidth />
+              </Card>
+            ) : openTasks.length === 0 ? (
+              <Card style={{ gap: Spacing.three }}>
+                <ThemedView type="backgroundSelected" style={styles.emptyIllustration}>
+                  <ThemedText style={styles.emptyEmoji}>🌱</ThemedText>
+                </ThemedView>
+                <ThemedText type="smallBold">A quiet, gentle start</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Capture your first task above — it will appear here, ready to complete. Completing it
+                  earns XP for your companion.
+                </ThemedText>
+              </Card>
+            ) : null}
+          </View>
+        }
+        ListFooterComponent={
+          <View style={styles.pageContent}>
+            {/* Upcoming tasks — due after tomorrow (distant recurring tasks stay visible) */}
+            {(upcomingTasks.data ?? []).length > 0 ? (
+              <>
+                <SectionTitle>Upcoming</SectionTitle>
+                <Card style={{ gap: Spacing.four }}>
+                  {(upcomingTasks.data ?? []).map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      title={task.title}
+                      dueAt={task.due_at}
+                      listName={task.list_id ? (listNameById.get(task.list_id) ?? null) : null}
+                      notes={task.notes}
+                      onToggle={() => toggleComplete(task)}
+                      onEdit={() => openEdit(task)}
+                      onDelete={() => removeTask(task)}
+                    />
+                  ))}
+                </Card>
+              </>
+            ) : null}
 
-      {/* Upcoming tasks — due after tomorrow (distant recurring tasks stay visible) */}
-      {(upcomingTasks.data ?? []).length > 0 ? (
-        <>
-          <SectionTitle>Upcoming</SectionTitle>
-          <Card style={{ gap: Spacing.four }}>
-            {(upcomingTasks.data ?? []).map((task) => (
-              <TaskRow
-                key={task.id}
-                title={task.title}
-                dueAt={task.due_at}
-                onToggle={() => toggleComplete(task)}
-                onEdit={() => openEdit(task)}
-                onDelete={() => removeTask(task)}
+            {/* Completed today */}
+            {(completedToday.data ?? []).length > 0 ? (
+              <>
+                <SectionTitle>Done today</SectionTitle>
+                <Card style={{ gap: Spacing.four }}>
+                  {(completedToday.data ?? []).map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      title={task.title}
+                      dueAt={task.due_at}
+                      listName={task.list_id ? (listNameById.get(task.list_id) ?? null) : null}
+                      notes={task.notes}
+                      completed
+                      completedAt={task.completed_at}
+                      onToggle={() => toggleComplete(task)}
+                    />
+                  ))}
+                </Card>
+              </>
+            ) : null}
+
+            <SectionTitle>This month</SectionTitle>
+            <Card style={styles.snapshotCard}>
+              <ThemedView type="backgroundSelected" style={styles.moneyBadge}>
+                <ThemedText type="smallBold">{currencySymbol(currency)}</ThemedText>
+              </ThemedView>
+              <View style={styles.snapshotCopy}>
+                <ThemedText type="smallBold">Spending snapshot</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {monthTotal.isLoading
+                    ? 'Loading your month…'
+                    : `${formatCurrency(monthTotal.data ?? 0)} in ${new Date().toLocaleDateString(undefined, { month: 'long' })} — informational only, no judgment.`}
+                </ThemedText>
+              </View>
+              <IconButton
+                icon="→"
+                variant="outlined"
+                onPress={() => router.push('/money')}
+                accessibilityLabel="Open money"
               />
-            ))}
-          </Card>
-        </>
-      ) : null}
+            </Card>
+          </View>
+        }
+      />
 
-      {/* Completed today */}
-      {(completedToday.data ?? []).length > 0 ? (
-        <>
-          <SectionTitle>Done today</SectionTitle>
-          <Card style={{ gap: Spacing.four }}>
-            {(completedToday.data ?? []).map((task) => (
-              <TaskRow
-                key={task.id}
-                title={task.title}
-                dueAt={task.due_at}
-                completed
-                completedAt={task.completed_at}
-                onToggle={() => toggleComplete(task)}
-              />
-            ))}
-          </Card>
-        </>
-      ) : null}
 
-      <SectionTitle>This month</SectionTitle>
-      <Card style={styles.snapshotCard}>
-        <ThemedView type="backgroundSelected" style={styles.moneyBadge}>
-          <ThemedText type="smallBold">{currencySymbol(currency)}</ThemedText>
-        </ThemedView>
-        <View style={styles.snapshotCopy}>
-          <ThemedText type="smallBold">Spending snapshot</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary">
-            {monthTotal.isLoading
-              ? 'Loading your month…'
-              : `${formatCurrency(monthTotal.data ?? 0)} in ${new Date().toLocaleDateString(undefined, { month: 'long' })} — informational only, no judgment.`}
-          </ThemedText>
-        </View>
-        <IconButton
-          icon="→"
-          variant="outlined"
-          onPress={() => router.push('/money')}
-          accessibilityLabel="Open money"
-        />
-      </Card>
 
       {/* Edit task bottom sheet */}
       <Modal
@@ -487,6 +608,19 @@ export default function TodayScreen() {
                 onChange={(v) => setEditRepeat(v ?? 'none')}
               />
 
+              <TextField
+                label="Notes"
+                value={editNotes}
+                onChangeText={setEditNotes}
+                placeholder="Add details (optional)"
+              />
+              <SegmentedControl
+                options={listPickerOptions}
+                value={editList}
+                onChange={(v) => setEditList(v ?? 'none')}
+                wrap
+              />
+
               {editError ? (
                 <ThemedText type="smallBold" themeColor="danger">
                   {editError}
@@ -504,11 +638,37 @@ export default function TodayScreen() {
           </View>
         </View>
       </Modal>
-    </Screen>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  /** Vertical rhythm + width cap for the fixed header/footer content around the task list. */
+  pageContent: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: Spacing.four,
+    gap: Spacing.three,
+    paddingTop: Spacing.six,
+  },
+  /** The virtualized task list itself — capped to the page width. */
+  listContent: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignSelf: 'center',
+    flexGrow: 1,
+    paddingHorizontal: Spacing.four,
+  },
+  rowCard: {
+    borderRadius: Radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.four,
+    paddingVertical: Spacing.three,
+  },
+  rowSeparator: {
+    height: Spacing.two,
+  },
   hero: {
     gap: Spacing.three,
   },

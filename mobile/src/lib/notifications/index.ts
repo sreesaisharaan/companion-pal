@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
+import { isRunningInExpoGo } from 'expo';
 import type * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
@@ -41,25 +42,49 @@ const DAY_MS = 86_400_000;
 type NotificationsModule = typeof import('expo-notifications');
 
 let nativeNotifications: NotificationsModule | null = null;
+let notificationsUnavailable = false;
 
 /**
- * Native-only handle to expo-notifications. The module is intentionally not
- * imported statically: at import time it registers a push-token listener, and
- * its web polyfill logs a warning for that ("Adding a listener will have no
- * effect"). Every call site below is already behind a `remindersSupported()`
- * guard, so on web this is never invoked and the module never evaluates.
+ * Native-only handle to expo-notifications, or null when the module is not
+ * available — web, or Expo Go on Android, where expo-notifications was removed
+ * in SDK 53. The module is intentionally not imported statically: at import
+ * time it registers a push-token listener, and its web polyfill logs a warning
+ * for that ("Adding a listener will have no effect"). Call sites guard with
+ * `remindersSupported()` or a try/catch, so the app works fine with
+ * notifications simply unavailable (the in-app screens remain the reminder).
  */
-export function notifications(): NotificationsModule {
-  if (!nativeNotifications) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    nativeNotifications = require('expo-notifications');
+export function notifications(): NotificationsModule | null {
+  if (!nativeNotifications && !notificationsUnavailable) {
+    // In Expo Go on Android, expo-notifications no longer exists (removed in
+    // SDK 53): merely requiring it triggers a module load that throws, and the
+    // error surfaces asynchronously — no try/catch here can catch it. Detect
+    // and skip it entirely so the app never red-screens in Expo Go.
+    if (Platform.OS === 'android' && isRunningInExpoGo()) {
+      notificationsUnavailable = true;
+      return null;
+    }
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const mod = require('expo-notifications');
+      if (mod) {
+        nativeNotifications = mod;
+      } else {
+        notificationsUnavailable = true;
+      }
+    } catch {
+      notificationsUnavailable = true;
+    }
   }
-  return nativeNotifications!;
+  return nativeNotifications;
 }
 
-/** Local scheduled notifications are native-only (iOS/Android). */
+/**
+ * Local scheduled notifications are native-only (iOS/Android) and additionally
+ * require the expo-notifications module — unavailable on web and in Expo Go on
+ * Android, where the app must fall back to the in-app reminder screens.
+ */
 export function remindersSupported(): boolean {
-  return Platform.OS !== 'web';
+  return Platform.OS !== 'web' && notifications() !== null;
 }
 
 async function readStorage(key: string): Promise<string | null> {
@@ -89,10 +114,12 @@ async function removeStorage(key: string): Promise<void> {
 /** Android 8+ requires a notification channel; create the default one up front. */
 async function ensureNotificationChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
+  const mod = notifications();
+  if (!mod) return;
   try {
-    await notifications().setNotificationChannelAsync(CHANNEL_ID, {
+    await mod.setNotificationChannelAsync(CHANNEL_ID, {
       name: 'Reminders',
-      importance: notifications().AndroidImportance.DEFAULT,
+      importance: mod.AndroidImportance.DEFAULT,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#0B0B0B',
       sound: 'default',
@@ -107,8 +134,10 @@ export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 /** Current OS-level permission state (native only; web reports "undetermined"). */
 export async function getPermissionStatus(): Promise<PermissionStatus> {
   if (!remindersSupported()) return 'undetermined';
+  const mod = notifications();
+  if (!mod) return 'undetermined';
   try {
-    const current = await notifications().getPermissionsAsync();
+    const current = await mod.getPermissionsAsync();
     if (current.granted) return 'granted';
     if (current.status === 'denied') return 'denied';
     return 'undetermined';
@@ -125,15 +154,17 @@ export async function getPermissionStatus(): Promise<PermissionStatus> {
  */
 export async function requestPermissions(): Promise<boolean> {
   if (!remindersSupported()) return false;
+  const mod = notifications();
+  if (!mod) return false;
   try {
     await ensureNotificationChannel();
-    const current = await notifications().getPermissionsAsync();
+    const current = await mod.getPermissionsAsync();
     if (current.granted) return true;
     if (current.status === 'denied') return false;
     // Simulators can't meaningfully grant/display local notifications, so
     // don't raise a system dialog that can't be honored (expo-device check).
     if (!Device.isDevice) return false;
-    const requested = await notifications().requestPermissionsAsync();
+    const requested = await mod.requestPermissionsAsync();
     return requested.granted;
   } catch {
     return false;
@@ -200,7 +231,7 @@ async function cancelScheduledForTask(userId: string, taskId: string): Promise<v
     for (const row of data ?? []) {
       if (row.device_notification_id) {
         try {
-          await notifications().cancelScheduledNotificationAsync(row.device_notification_id);
+          await notifications()?.cancelScheduledNotificationAsync(row.device_notification_id);
         } catch {
           // Already fired or no longer scheduled — nothing to cancel.
         }
@@ -254,19 +285,20 @@ export async function scheduleTaskReminder({
 
   let notificationId: string | null = null;
   try {
-    notificationId = await notifications().scheduleNotificationAsync({
-      content: {
-        title: 'Companion Life',
-        body: `Reminder: “${taskTitle}” is on your list today.`,
-        sound: 'default',
-        data: { screen: 'today', taskId },
-      },
-      trigger: {
-        type: notifications().SchedulableTriggerInputTypes.DATE,
-        date: fireAt,
-        channelId: CHANNEL_ID,
-      },
-    });
+    notificationId =
+      (await notifications()?.scheduleNotificationAsync({
+        content: {
+          title: 'Companion Life',
+          body: `Reminder: “${taskTitle}” is on your list today.`,
+          sound: 'default',
+          data: { screen: 'today', taskId },
+        },
+        trigger: {
+          type: notifications()?.SchedulableTriggerInputTypes.DATE,
+          date: fireAt,
+          channelId: CHANNEL_ID,
+        },
+      })) ?? null;
   } catch {
     // Scheduling failed (e.g. simulator without notification support); the
     // intent is still recorded below so the reminders table stays truthful.
@@ -328,7 +360,7 @@ export async function cancelAllReminders(userId: string): Promise<void> {
     for (const row of data ?? []) {
       if (row.device_notification_id) {
         try {
-          await notifications().cancelScheduledNotificationAsync(row.device_notification_id);
+          await notifications()?.cancelScheduledNotificationAsync(row.device_notification_id);
         } catch {
           // Already fired or no longer scheduled.
         }
@@ -429,14 +461,14 @@ export async function scheduleWeeklyReview(): Promise<void> {
   const previousId = await readStorage(WEEKLY_REVIEW_NOTIFICATION_ID_KEY);
   if (previousId) {
     try {
-      await notifications().cancelScheduledNotificationAsync(previousId);
+      await notifications()?.cancelScheduledNotificationAsync(previousId);
     } catch {
       // Already fired or missing — nothing to cancel.
     }
   }
 
   try {
-    const id = await notifications().scheduleNotificationAsync({
+    const id = await notifications()?.scheduleNotificationAsync({
       content: {
         title: 'Companion Life',
         body: 'Your weekly review is ready — a gentle look back at the week (+15 XP). No pressure.',
@@ -444,14 +476,16 @@ export async function scheduleWeeklyReview(): Promise<void> {
         data: { screen: 'plan' },
       },
       trigger: {
-        type: notifications().SchedulableTriggerInputTypes.WEEKLY,
+        type: notifications()?.SchedulableTriggerInputTypes.WEEKLY,
         weekday: prefs.weekday,
         hour: prefs.hour,
         minute: prefs.minute,
         channelId: CHANNEL_ID,
       },
     });
-    await writeStorage(WEEKLY_REVIEW_NOTIFICATION_ID_KEY, id);
+    if (id) {
+      await writeStorage(WEEKLY_REVIEW_NOTIFICATION_ID_KEY, id);
+    }
   } catch {
     // Scheduling failed (simulator etc.) — the Plan tab remains the reminder.
   }
@@ -462,7 +496,7 @@ async function cancelStoredNotification(key: string): Promise<void> {
   const id = await readStorage(key);
   if (!id) return;
   try {
-    await notifications().cancelScheduledNotificationAsync(id);
+    await notifications()?.cancelScheduledNotificationAsync(id);
   } catch {
     // Already fired or missing.
   }
@@ -549,7 +583,7 @@ export async function scheduleCompanionNudge(userId: string | undefined): Promis
   const previousId = await readStorage(COMPANION_NUDGE_NOTIFICATION_ID_KEY);
   if (previousId) {
     try {
-      await notifications().cancelScheduledNotificationAsync(previousId);
+      await notifications()?.cancelScheduledNotificationAsync(previousId);
     } catch {
       // Already fired or missing.
     }
@@ -558,7 +592,7 @@ export async function scheduleCompanionNudge(userId: string | undefined): Promis
   const meta =
     stage && stage in STAGE_META ? STAGE_META[stage as keyof typeof STAGE_META] : STAGE_META.hatchling;
   try {
-    const id = await notifications().scheduleNotificationAsync({
+    const id = await notifications()?.scheduleNotificationAsync({
       content: {
         title: 'Companion Life',
         body: `${meta.blurb} Your companion is here whenever you're ready. No pressure, no penalties.`,
@@ -566,13 +600,15 @@ export async function scheduleCompanionNudge(userId: string | undefined): Promis
         data: { screen: 'today' },
       },
       trigger: {
-        type: notifications().SchedulableTriggerInputTypes.DATE,
+        type: notifications()?.SchedulableTriggerInputTypes.DATE,
         date: fireAt,
         channelId: CHANNEL_ID,
       },
     });
-    await writeStorage(COMPANION_NUDGE_NOTIFICATION_ID_KEY, id);
-    await writeStorage(COMPANION_NUDGE_LAST_SCHEDULED_KEY, new Date().toISOString());
+    if (id) {
+      await writeStorage(COMPANION_NUDGE_NOTIFICATION_ID_KEY, id);
+      await writeStorage(COMPANION_NUDGE_LAST_SCHEDULED_KEY, new Date().toISOString());
+    }
   } catch {
     // Scheduling failed (simulator etc.) — skip the nudge quietly.
   }

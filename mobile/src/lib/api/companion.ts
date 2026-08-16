@@ -103,3 +103,25 @@ export function useSetCompanionQuietMode(userId: string | undefined) {
     },
   });
 }
+
+/** Name the companion (cosmetic, like quiet_mode — XP/stage stay server-side). */
+export function useSetCompanionName(userId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (name: string) => {
+      if (!userId) throw new Error('Not signed in');
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error('Give your companion a name.');
+      const db = requireSupabase();
+      const { error } = await db
+        .from('companions')
+        .update({ name: trimmed })
+        .eq('user_id', userId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['companion'] });
+    },
+  });
+}

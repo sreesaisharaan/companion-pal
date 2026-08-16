@@ -71,7 +71,11 @@ function RootNavigator() {
   // covers cold starts (app killed), once the session has been restored.
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    const subscription = notifications().addNotificationResponseReceivedListener((response) => {
+    // Expo Go on Android has no expo-notifications module (removed in SDK 53),
+    // so the deep-link listener is simply absent there — never crash.
+    const notificationsModule = notifications();
+    if (!notificationsModule) return;
+    const subscription = notificationsModule.addNotificationResponseReceivedListener((response) => {
       router.navigate(notificationDeepLink(response));
     });
     return () => subscription.remove();
@@ -80,7 +84,9 @@ function RootNavigator() {
   useEffect(() => {
     if (Platform.OS === 'web' || isLoading || coldStartHandled.current) return;
     coldStartHandled.current = true;
-    notifications().getLastNotificationResponseAsync()
+    const notificationsModule = notifications();
+    if (!notificationsModule) return;
+    notificationsModule.getLastNotificationResponseAsync()
       .then((response) => {
         if (!response) return;
         router.navigate(notificationDeepLink(response));
