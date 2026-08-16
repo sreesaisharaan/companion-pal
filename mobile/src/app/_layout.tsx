@@ -9,6 +9,7 @@ import { AppState, Platform, StyleSheet } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { notificationDeepLink, notifications, scheduleCompanionNudge } from '@/lib/notifications';
 import { AppQueryProvider } from '@/lib/query-provider';
@@ -61,6 +62,7 @@ function LoadingShell() {
 function RootNavigator() {
   const { isLoading, session } = useAuth();
   const userId = session?.user?.id;
+  const theme = useTheme();
   usePageTitle();
   const coldStartHandled = useRef(false);
 
@@ -116,7 +118,11 @@ function RootNavigator() {
           shell's <Head> covers SSR. The Stack is never mounted during the
           loading state, so title options here would never reach SSR and would
           only add a coarser competing writer for the tabs. */}
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
+      {/* Paint the navigator's content area with the app background. expo-router's
+          NavigationContainer always uses react-navigation's light theme behind the
+          scenes, so a transparent contentStyle lets that light-grey sheet show
+          through during stack transitions / overscroll when dark mode is active. */}
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
       </Stack>
