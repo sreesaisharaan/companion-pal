@@ -3,16 +3,20 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/screen';
+import { SectionTitle } from '@/components/section-title';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { SegmentedControl } from '@/components/ui/segmented-control';
 import { TextField } from '@/components/ui/text-field';
 import { Spacing } from '@/constants/theme';
+import { APPEARANCE_OPTIONS, setAppearancePreference, useAppearance } from '@/hooks/use-appearance';
 import { useAuth } from '@/lib/auth-context';
 
 export default function SignInScreen() {
   const { isConfigured, signIn, signUp } = useAuth();
+  const appearance = useAppearance();
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -128,6 +132,23 @@ export default function SignInScreen() {
           </ThemedText>
         </Card>
       )}
+
+      <SectionTitle>Preferences</SectionTitle>
+      <Card style={{ gap: Spacing.three }}>
+        <View style={styles.prefRow}>
+          <View style={styles.prefCopy}>
+            <ThemedText type="small">Appearance</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Dark mode for low-light evenings — or follow your device. Applies instantly.
+            </ThemedText>
+          </View>
+        </View>
+        <SegmentedControl
+          options={APPEARANCE_OPTIONS}
+          value={appearance}
+          onChange={(value) => value && setAppearancePreference(value)}
+        />
+      </Card>
     </Screen>
   );
 }
@@ -155,6 +176,16 @@ const styles = StyleSheet.create({
   switchRow: {
     alignItems: 'center',
     gap: Spacing.two,
+  },
+  prefRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  prefCopy: {
+    flex: 1,
+    gap: Spacing.half,
   },
   confirmBox: {
     borderRadius: 12,
