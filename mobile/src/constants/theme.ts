@@ -26,6 +26,11 @@ export const Colors = {
     // onPrimary, which flips with the scheme and is only correct on primary
     // surfaces (e.g. solid CTA buttons).
     onSecondary: '#FFFFFF',
+    // Muted ink for the dark supporting cards. Page-level textSecondary is
+    // tuned for white paper and drops to ~4:1 on the near-black fill — this
+    // lighter value clears WCAG AA (4.5:1) while staying clearly dimmer than
+    // onSecondary for hierarchy.
+    onSecondaryMuted: '#A8A8A8',
     // Hairline rules: cards, inputs
     border: '#E5E5E5',
     // Stronger rule for interactive outlines (buttons)
@@ -67,6 +72,9 @@ export const Colors = {
     // Dark supporting cards keep light ink — unlike onPrimary, which is black
     // in this scheme and would vanish on the near-black secondary fill.
     onSecondary: '#F5F5F5',
+    // Muted ink for dark supporting cards: the page-level textSecondary is
+    // already legible (~7:1) on the near-black fill here, so it mirrors it.
+    onSecondaryMuted: '#9A9A9A',
     // Hairline rules
     border: '#2A2A2A',
     // Stronger rule for interactive outlines (buttons)

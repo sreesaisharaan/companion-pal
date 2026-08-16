@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
+import type * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { STAGE_META } from '@/lib/api/companion';
@@ -38,6 +38,25 @@ const CHANNEL_ID = 'reminders';
 
 const DAY_MS = 86_400_000;
 
+type NotificationsModule = typeof import('expo-notifications');
+
+let nativeNotifications: NotificationsModule | null = null;
+
+/**
+ * Native-only handle to expo-notifications. The module is intentionally not
+ * imported statically: at import time it registers a push-token listener, and
+ * its web polyfill logs a warning for that ("Adding a listener will have no
+ * effect"). Every call site below is already behind a `remindersSupported()`
+ * guard, so on web this is never invoked and the module never evaluates.
+ */
+export function notifications(): NotificationsModule {
+  if (!nativeNotifications) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    nativeNotifications = require('expo-notifications');
+  }
+  return nativeNotifications!;
+}
+
 /** Local scheduled notifications are native-only (iOS/Android). */
 export function remindersSupported(): boolean {
   return Platform.OS !== 'web';
@@ -71,9 +90,9 @@ async function removeStorage(key: string): Promise<void> {
 async function ensureNotificationChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   try {
-    await Notifications.setNotificationChannelAsync(CHANNEL_ID, {
+    await notifications().setNotificationChannelAsync(CHANNEL_ID, {
       name: 'Reminders',
-      importance: Notifications.AndroidImportance.DEFAULT,
+      importance: notifications().AndroidImportance.DEFAULT,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#0B0B0B',
       sound: 'default',
@@ -89,7 +108,7 @@ export type PermissionStatus = 'granted' | 'denied' | 'undetermined';
 export async function getPermissionStatus(): Promise<PermissionStatus> {
   if (!remindersSupported()) return 'undetermined';
   try {
-    const current = await Notifications.getPermissionsAsync();
+    const current = await notifications().getPermissionsAsync();
     if (current.granted) return 'granted';
     if (current.status === 'denied') return 'denied';
     return 'undetermined';
@@ -108,13 +127,13 @@ export async function requestPermissions(): Promise<boolean> {
   if (!remindersSupported()) return false;
   try {
     await ensureNotificationChannel();
-    const current = await Notifications.getPermissionsAsync();
+    const current = await notifications().getPermissionsAsync();
     if (current.granted) return true;
     if (current.status === 'denied') return false;
     // Simulators can't meaningfully grant/display local notifications, so
     // don't raise a system dialog that can't be honored (expo-device check).
     if (!Device.isDevice) return false;
-    const requested = await Notifications.requestPermissionsAsync();
+    const requested = await notifications().requestPermissionsAsync();
     return requested.granted;
   } catch {
     return false;
@@ -181,7 +200,7 @@ async function cancelScheduledForTask(userId: string, taskId: string): Promise<v
     for (const row of data ?? []) {
       if (row.device_notification_id) {
         try {
-          await Notifications.cancelScheduledNotificationAsync(row.device_notification_id);
+          await notifications().cancelScheduledNotificationAsync(row.device_notification_id);
         } catch {
           // Already fired or no longer scheduled — nothing to cancel.
         }
@@ -235,7 +254,7 @@ export async function scheduleTaskReminder({
 
   let notificationId: string | null = null;
   try {
-    notificationId = await Notifications.scheduleNotificationAsync({
+    notificationId = await notifications().scheduleNotificationAsync({
       content: {
         title: 'Companion Life',
         body: `Reminder: “${taskTitle}” is on your list today.`,
@@ -243,7 +262,7 @@ export async function scheduleTaskReminder({
         data: { screen: 'today', taskId },
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        type: notifications().SchedulableTriggerInputTypes.DATE,
         date: fireAt,
         channelId: CHANNEL_ID,
       },
@@ -309,7 +328,7 @@ export async function cancelAllReminders(userId: string): Promise<void> {
     for (const row of data ?? []) {
       if (row.device_notification_id) {
         try {
-          await Notifications.cancelScheduledNotificationAsync(row.device_notification_id);
+          await notifications().cancelScheduledNotificationAsync(row.device_notification_id);
         } catch {
           // Already fired or no longer scheduled.
         }
@@ -410,14 +429,14 @@ export async function scheduleWeeklyReview(): Promise<void> {
   const previousId = await readStorage(WEEKLY_REVIEW_NOTIFICATION_ID_KEY);
   if (previousId) {
     try {
-      await Notifications.cancelScheduledNotificationAsync(previousId);
+      await notifications().cancelScheduledNotificationAsync(previousId);
     } catch {
       // Already fired or missing — nothing to cancel.
     }
   }
 
   try {
-    const id = await Notifications.scheduleNotificationAsync({
+    const id = await notifications().scheduleNotificationAsync({
       content: {
         title: 'Companion Life',
         body: 'Your weekly review is ready — a gentle look back at the week (+15 XP). No pressure.',
@@ -425,7 +444,7 @@ export async function scheduleWeeklyReview(): Promise<void> {
         data: { screen: 'plan' },
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+        type: notifications().SchedulableTriggerInputTypes.WEEKLY,
         weekday: prefs.weekday,
         hour: prefs.hour,
         minute: prefs.minute,
@@ -443,7 +462,7 @@ async function cancelStoredNotification(key: string): Promise<void> {
   const id = await readStorage(key);
   if (!id) return;
   try {
-    await Notifications.cancelScheduledNotificationAsync(id);
+    await notifications().cancelScheduledNotificationAsync(id);
   } catch {
     // Already fired or missing.
   }
@@ -530,7 +549,7 @@ export async function scheduleCompanionNudge(userId: string | undefined): Promis
   const previousId = await readStorage(COMPANION_NUDGE_NOTIFICATION_ID_KEY);
   if (previousId) {
     try {
-      await Notifications.cancelScheduledNotificationAsync(previousId);
+      await notifications().cancelScheduledNotificationAsync(previousId);
     } catch {
       // Already fired or missing.
     }
@@ -539,7 +558,7 @@ export async function scheduleCompanionNudge(userId: string | undefined): Promis
   const meta =
     stage && stage in STAGE_META ? STAGE_META[stage as keyof typeof STAGE_META] : STAGE_META.hatchling;
   try {
-    const id = await Notifications.scheduleNotificationAsync({
+    const id = await notifications().scheduleNotificationAsync({
       content: {
         title: 'Companion Life',
         body: `${meta.blurb} Your companion is here whenever you're ready. No pressure, no penalties.`,
@@ -547,7 +566,7 @@ export async function scheduleCompanionNudge(userId: string | undefined): Promis
         data: { screen: 'today' },
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DATE,
+        type: notifications().SchedulableTriggerInputTypes.DATE,
         date: fireAt,
         channelId: CHANNEL_ID,
       },

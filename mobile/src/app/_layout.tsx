@@ -1,5 +1,4 @@
 import { Image } from 'expo-image';
-import * as Notifications from 'expo-notifications';
 import { router, Stack, usePathname } from 'expo-router';
 import Head from 'expo-router/head';
 import * as SplashScreen from 'expo-splash-screen';
@@ -11,7 +10,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
-import { notificationDeepLink, scheduleCompanionNudge } from '@/lib/notifications';
+import { notificationDeepLink, notifications, scheduleCompanionNudge } from '@/lib/notifications';
 import { AppQueryProvider } from '@/lib/query-provider';
 
 SplashScreen.preventAutoHideAsync();
@@ -70,7 +69,7 @@ function RootNavigator() {
   // covers cold starts (app killed), once the session has been restored.
   useEffect(() => {
     if (Platform.OS === 'web') return;
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    const subscription = notifications().addNotificationResponseReceivedListener((response) => {
       router.navigate(notificationDeepLink(response));
     });
     return () => subscription.remove();
@@ -79,7 +78,7 @@ function RootNavigator() {
   useEffect(() => {
     if (Platform.OS === 'web' || isLoading || coldStartHandled.current) return;
     coldStartHandled.current = true;
-    Notifications.getLastNotificationResponseAsync()
+    notifications().getLastNotificationResponseAsync()
       .then((response) => {
         if (!response) return;
         router.navigate(notificationDeepLink(response));

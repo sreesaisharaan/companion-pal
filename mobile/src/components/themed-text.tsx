@@ -17,11 +17,17 @@ export function ThemedText({ style, type = 'default', themeColor, ...rest }: The
   // in dark mode) — onPrimary flips to black in dark mode and would vanish.
   const variant = useCardVariant();
   const fallback: ThemeColor = variant === 'secondary' ? 'onSecondary' : 'text';
+  // Explicitly muted copy on a dark supporting card also switches to the
+  // on-fill muted ink: page-level textSecondary is tuned for white paper and
+  // drops to ~4:1 on the near-black fill. onSecondaryMuted stays legible in
+  // both schemes while reading dimmer than onSecondary.
+  const color: ThemeColor | undefined =
+    themeColor === 'textSecondary' && variant === 'secondary' ? 'onSecondaryMuted' : themeColor;
 
   return (
     <Text
       style={[
-        { color: theme[themeColor ?? fallback] },
+        { color: theme[color ?? fallback] },
         type === 'default' && styles.default,
         type === 'title' && styles.title,
         type === 'small' && styles.small,

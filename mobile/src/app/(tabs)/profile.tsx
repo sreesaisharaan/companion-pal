@@ -30,6 +30,7 @@ import {
   currencySymbol,
   useCurrency,
 } from '@/hooks/use-currency';
+import { APPEARANCE_OPTIONS, setAppearancePreference, useAppearance } from '@/hooks/use-appearance';
 import { useTheme } from '@/hooks/use-theme';
 import { AUTO_TIMEZONE, TIMEZONE_OPTIONS, useTimezone } from '@/hooks/use-timezone';
 import { useAuth } from '@/lib/auth-context';
@@ -144,6 +145,7 @@ export default function ProfileScreen() {
   const email = session?.user?.email ?? '—';
   const userId = session?.user?.id;
   const theme = useTheme();
+  const appearance = useAppearance();
   const {
     currency,
     isAuto,
@@ -443,6 +445,20 @@ export default function ProfileScreen() {
 
       <SectionTitle>Preferences</SectionTitle>
       <Card style={{ gap: Spacing.three }}>
+        <View style={styles.prefRow}>
+          <View style={styles.prefCopy}>
+            <ThemedText type="small">Appearance</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Dark mode for low-light evenings — or follow your device.
+            </ThemedText>
+          </View>
+        </View>
+        <SegmentedControl
+          options={APPEARANCE_OPTIONS}
+          value={appearance}
+          onChange={(value) => value && setAppearancePreference(value)}
+        />
+
         <Pressable
           onPress={() => setTimezoneSheetOpen(true)}
           accessibilityRole="button"

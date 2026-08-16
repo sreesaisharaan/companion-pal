@@ -79,7 +79,9 @@ export function TaskRow({ title, dueAt, completed, completedAt, onToggle, onEdit
     <>
       <ThemedText
         type="smallBold"
-        style={completed ? [styles.done, { color: theme.textSecondary }] : undefined}
+        // Completed titles sit on dark secondary cards, so the muted ink is the
+        // on-fill variant (page-level textSecondary is ~4:1 there).
+        style={completed ? [styles.done, { color: theme.onSecondaryMuted }] : undefined}
         numberOfLines={2}>
         {title}
       </ThemedText>
