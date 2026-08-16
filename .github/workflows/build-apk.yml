@@ -1,6 +1,6 @@
 name: Build Android APK
 
-# Builds a release APK for the Companion Life v1 app without needing an Expo
+# Builds a release APK for the Companion Life app without needing an Expo
 # account or EAS cloud build: `expo prebuild` generates the native android/
 # project, then gradle produces an installable release APK which is uploaded
 # as an artifact. Release builds default to the debug keystore (same as EAS
@@ -91,7 +91,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: companion-life-v1-apk
+          name: companion-life-v2-apk
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
