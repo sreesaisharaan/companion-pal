@@ -16,12 +16,10 @@ import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { notificationDeepLink, notifications, scheduleCompanionNudge } from '@/lib/notifications';
 import { AppQueryProvider } from '@/lib/query-provider';
+import { isSupabaseConfigured } from '@/lib/supabase';
 
 const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
-
-if (!publishableKey) {
-  throw new Error("Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY. Add your key to .env.\nRun: 1) clerk auth login  2) clerk link  3) clerk env pull — then restart the dev server.");
-}
+const clerkConfigured = Boolean(publishableKey);
 
 SplashScreen.preventAutoHideAsync();
 
@@ -63,6 +61,32 @@ function LoadingShell() {
       <ThemedText type="subtitle">Companion Life</ThemedText>
       <ThemedText type="small" themeColor="textSecondary" style={styles.shellCopy}>
         A gentle companion for tasks, spending, and small progress.
+      </ThemedText>
+    </ThemedView>
+  );
+}
+
+/**
+ * Branded screen shown when required environment configuration is missing
+ * (Clerk publishable key, or Supabase URL/anon key). Rendered instead of an
+ * uncaught top-level throw, so a fresh checkout opens to a clear message
+ * instead of a crash. Uses only theme primitives, so it can render outside
+ * the Clerk/query providers.
+ */
+function ConfigNeededScreen({ message }: { message: string }) {
+  return (
+    <ThemedView style={styles.shell}>
+      <Image
+        source={require('@/assets/images/companion/hatchling.png')}
+        style={styles.shellImage}
+        contentFit="contain"
+      />
+      <ThemedText type="subtitle">Companion Life</ThemedText>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.shellCopy}>
+        {message}
+      </ThemedText>
+      <ThemedText type="small" themeColor="textSecondary" style={styles.shellCopy}>
+        Add the key to mobile/.env, then restart the dev server.
       </ThemedText>
     </ThemedView>
   );
@@ -137,22 +161,39 @@ function RootNavigator() {
           NavigationContainer always uses react-navigation's light theme behind the
           scenes, so a transparent contentStyle lets that light-grey sheet show
           through during stack transitions / overscroll when dark mode is active. */}
-      <ErrorBoundary>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-        </Stack>
-      </ErrorBoundary>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+      </Stack>
     </>
   );
 }
 
 export default function RootLayout() {
+  const missingConfig = !clerkConfigured
+    ? 'Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY. Run: clerk auth login, clerk link, clerk env pull — then restart.'
+    : !isSupabaseConfigured
+      ? 'Missing EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in mobile/.env.'
+      : null;
+
+  // The gap screen is intentionally outside the provider tree: ClerkProvider
+  // cannot run without its key, and the screen only uses theme primitives.
+  // Hide the splash so a native cold start doesn't sit on the logo forever.
+  useEffect(() => {
+    if (missingConfig) SplashScreen.hideAsync().catch(() => {});
+  }, [missingConfig]);
+
+  if (missingConfig) {
+    return <ConfigNeededScreen message={missingConfig} />;
+  }
+
   return (
     <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
       <AppQueryProvider>
         <AuthProvider>
-          <RootNavigator />
+          <ErrorBoundary>
+            <RootNavigator />
+          </ErrorBoundary>
         </AuthProvider>
       </AppQueryProvider>
     </ClerkProvider>

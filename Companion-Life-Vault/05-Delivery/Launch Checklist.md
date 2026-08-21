@@ -6,6 +6,7 @@
 - [x] EAS build config ready (`eas.json` with development/preview/production profiles; `ios.bundleIdentifier` + `android.package` = com.companionlife.app; version 1.0.0, buildNumber 1, versionCode 1; Android permissions VIBRATE + RECEIVE_BOOT_COMPLETED; production web export passes 2026-08-05)
 - [ ] Real devices tested on iOS and Android
 - [x] Auth recovery and account deletion verified (delete-account Edge Function, cascade + idempotency proven live 2026-08-05)
+- [x] Auth migrated to Clerk (2026-08-21): sign-up email verification + OAuth, secure session persistence, token-based RLS across the schema (migration 0011), edge functions verify Clerk tokens; gap screens instead of crashes on missing config
 - [x] RLS policies tested with two accounts (isolation + cross-user write 403 proven live 2026-08-05)
 - [x] RLS suite executed against the cloud project (all 7 assertion groups pass; suite fixed to be portable — schema-qualified pgcrypto + real auth.users rows 2026-08-05)
 - [x] Monthly budget set/edit/remove verified live (progress bars, over-budget state 2026-08-05)
@@ -15,7 +16,7 @@
 - [x] Currency is locale-aware (expo-localization device currency + `profiles.preferred_currency` preference, `'auto' | ISO 4217`, migration 0006; Auto picker in Profile; locked INR verified live across every money surface 2026-08-06)
 - [x] Design system standardized (one light hero card per screen, dark secondary cards, CTAButton vs chipSelected pills, shared ScreenHeader/SegmentedControl/ProgressBar tokens 2026-08-06)
 - [ ] Reduced motion, screen reader, dynamic type, and contrast checks completed
-- [ ] Privacy policy, support contact, and data handling explanation drafted
+- [x] Privacy policy + data handling explanation drafted (mobile/PRIVACY.md; support contact + store policies to be finalised with the store account 2026-08-21)
 
 ## Beta exit
 

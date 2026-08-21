@@ -17,12 +17,31 @@
 import { verifyToken } from 'npm:@clerk/backend@1';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Max-Age': '86400',
-};
+// CORS answers are computed per request. By default any origin is allowed
+// (dev convenience); set the ALLOWED_ORIGINS secret to a comma-separated list
+// to restrict the function to specific web origins.
+function allowedOrigin(req: Request): string | null {
+  const allowlist = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (allowlist.length === 0) return '*';
+  return req.headers.get('Origin') ?? null;
+}
+
+function corsHeaders(req: Request): Record<string, string> {
+  const origin = allowedOrigin(req);
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Max-Age': '86400',
+  };
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Vary'] = 'Origin';
+  }
+  return headers;
+}
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -30,33 +49,33 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
-function json(body: unknown, status = 200): Response {
+function json(body: unknown, req: Request, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json', ...corsHeaders },
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
   });
 }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', { headers: corsHeaders(req) });
   }
 
   const authorization = req.headers.get('Authorization');
   const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : authorization;
-  if (!token) return json({ error: 'missing authorization' }, 401);
+  if (!token) return json({ error: 'missing authorization' }, req, 401);
 
   const secretKey = Deno.env.get('CLERK_SECRET_KEY') ?? '';
-  if (!secretKey) return json({ error: 'CLERK_SECRET_KEY is not configured' }, 500);
+  if (!secretKey) return json({ error: 'CLERK_SECRET_KEY is not configured' }, req, 500);
 
   let userId: string | null = null;
   try {
     const payload = await verifyToken(token, { secretKey });
     userId = payload.sub ?? null;
   } catch {
-    return json({ error: 'unauthorized' }, 401);
+    return json({ error: 'unauthorized' }, req, 401);
   }
-  if (!userId) return json({ error: 'unauthorized' }, 401);
+  if (!userId) return json({ error: 'unauthorized' }, req, 401);
 
   // 1. Delete the Clerk user. Idempotent: a retry after a lost response must
   //    still report success, so a 404 is treated as already-deleted.
@@ -65,7 +84,7 @@ Deno.serve(async (req) => {
     headers: { Authorization: `Bearer ${secretKey}` },
   });
   if (clerkResponse.status !== 404 && !clerkResponse.ok) {
-    return json({ error: 'could not delete the account' }, 500);
+    return json({ error: 'could not delete the account' }, req, 500);
   }
 
   // 2. Remove the profile row; every user table cascades from it. The service
@@ -73,8 +92,8 @@ Deno.serve(async (req) => {
   //    rows can be deleted wholesale.
   const { error } = await supabase.from('profiles').delete().eq('id', userId);
   if (error) {
-    return json({ error: error.message }, 500);
+    return json({ error: error.message }, req, 500);
   }
 
-  return json({ deleted: true });
+  return json({ deleted: true }, req);
 });

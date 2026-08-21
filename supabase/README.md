@@ -56,6 +56,9 @@ Schema, RLS policies, and tests for the Companion Life backend.
 
    ```bash
    supabase secrets set CLERK_SECRET_KEY=<secret key>
+   # Optional: restrict the edge functions to specific web origins (omit for
+   # "*" in development). Set it before deploying production.
+   supabase secrets set ALLOWED_ORIGINS=https://your-web-app.example.com
    supabase functions deploy award-xp delete-account
    ```
 
