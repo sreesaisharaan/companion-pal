@@ -17,11 +17,15 @@ import { EMPTY_STATS, useCompleteWeeklyReview, useWeekReview } from '@/lib/api/r
 import { useTaskLists } from '@/lib/api/tasks';
 
 /** The review week's Monday — the stats below cover Monday → now, so the
- * label must show the week's start, not today's date. */
-const WEEK_LABEL = startOfWeek().toLocaleDateString(undefined, {
-  month: 'long',
-  day: 'numeric',
-});
+ * label must show the week's start, not today's date. Computed per render
+ * (via the screen below) so a screen left open across a week boundary stays
+ * correct. */
+function weekLabel(): string {
+  return startOfWeek().toLocaleDateString(undefined, {
+    month: 'long',
+    day: 'numeric',
+  });
+}
 
 export default function PlanScreen() {
   const { session } = useAuth();
@@ -50,7 +54,7 @@ export default function PlanScreen() {
       <SectionTitle>Weekly review</SectionTitle>
       <Card variant="primary" elevated style={styles.reviewHero}>
         <ThemedText type="smallBold" themeColor="textSecondary" style={styles.reviewKicker}>
-          {reviewed ? 'Reviewed this week' : 'Week of'} · {WEEK_LABEL}
+          {reviewed ? 'Reviewed this week' : 'Week of'} · {weekLabel()}
         </ThemedText>
 
         <View style={styles.statRow}>

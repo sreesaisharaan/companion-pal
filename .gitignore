@@ -21,3 +21,19 @@ supabase/.temp/
 
 # Local Claude settings
 .claude/settings.local.json
+
+# Local dev / runtime artifacts that can appear at the repo root (launched
+# from an editor, emulator, or the Expo CLI). Nothing here belongs in the repo.
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+desktop-v2.db*
+ui*.xml
+emulator*.png
+preview*.png
+preview*.log
+web-preview*.png
+clerk-login*.log
+run.md

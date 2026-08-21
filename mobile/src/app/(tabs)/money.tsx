@@ -43,11 +43,6 @@ const RANGES: { value: MoneyRange; label: string }[] = [
   { value: 'all', label: 'All time' },
 ];
 
-const MONTH_LABEL = new Date().toLocaleDateString(undefined, {
-  month: 'long',
-  year: 'numeric',
-});
-
 /**
  * Strictly parse a money amount: digits with an optional 1–2 decimal places,
  * a comma accepted as the decimal separator (12,50 → 12.5). Everything else
@@ -67,7 +62,7 @@ export default function MoneyScreen() {
   const { session } = useAuth();
   const userId = session?.user?.id;
   const theme = useTheme();
-  const { formatCurrency } = useCurrency();
+  const { formatCurrency, currency } = useCurrency();
   const insets = useSafeAreaInsets();
 
   const [range, setRange] = useState<MoneyRange>('month');
@@ -78,11 +73,17 @@ export default function MoneyScreen() {
   const [budgetAmountText, setBudgetAmountText] = useState('');
   const [budgetError, setBudgetError] = useState<string | null>(null);
 
+  // Recompute per render (not at module load) so a screen left open across
+  // midnight shows the right month.
+  const monthLabel = new Date().toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
   const budgetMonth = localDateString(startOfMonth());
 
   const companion = useCompanion(userId);
   const categoriesQuery = useBudgetCategories(userId);
-  const transactionsQuery = useTransactions(userId, range);
+  const transactionsQuery = useTransactions(userId, range, currency);
   const budgetsQuery = useMonthlyBudgets(userId, budgetMonth);
   const saveTransaction = useSaveTransaction(userId);
   const deleteTransaction = useDeleteTransaction();
@@ -93,9 +94,24 @@ export default function MoneyScreen() {
   const existingCategories = useMemo(() => categoriesQuery.data ?? [], [categoriesQuery.data]);
 
   const total = transactions.reduce((sum, tx) => sum + tx.amount_minor, 0);
+  // Income vs spend split for the same currency-scoped list.
+  const incoming = transactions.reduce(
+    (sum, tx) => sum + (tx.amount_minor > 0 ? tx.amount_minor : 0),
+    0,
+  );
+  const outgoing = transactions.reduce(
+    (sum, tx) => sum + (tx.amount_minor < 0 ? -tx.amount_minor : 0),
+    0,
+  );
 
   const categoryNameById = useMemo(
     () => new Map(existingCategories.map((category) => [category.id, category.name])),
+    [existingCategories],
+  );
+
+  // Stored emoji per category name so a get-or-created category keeps its icon.
+  const emojiByName = useMemo(
+    () => new Map(existingCategories.map((category) => [category.name, category.emoji ?? null])),
     [existingCategories],
   );
 
@@ -141,7 +157,11 @@ export default function MoneyScreen() {
   const maxSpend = Math.max(0, ...spendByCategory.values());
 
   const categoryRows = visibleCategories
-    .map((name) => ({ name, emoji: categoryEmoji(name), spend: spendByCategory.get(name) ?? 0 }))
+    .map((name) => ({
+      name,
+      emoji: categoryEmoji(name, emojiByName.get(name) ?? null),
+      spend: spendByCategory.get(name) ?? 0,
+    }))
     .filter((row) => row.spend > 0);
   const otherSpend = spendByCategory.get('Other') ?? 0;
 
@@ -199,6 +219,7 @@ export default function MoneyScreen() {
       categoryName,
       note: note || null,
       occurredOn,
+      currency,
     };
     saveTransaction.mutate(
       editing ? { id: editing.id, ...input } : input,
@@ -293,7 +314,7 @@ export default function MoneyScreen() {
             <ScreenHeader
               eyebrow="Companion Life"
               title="Money"
-              subtitle={MONTH_LABEL}
+              subtitle={monthLabel}
               image={STAGE_META[(companion.data ?? DEFAULT_COMPANION).stage].image}
             />
 
@@ -316,6 +337,18 @@ export default function MoneyScreen() {
                   ? 'Add your first transaction — totals update the moment you save one.'
                   : 'Expenses count down, income counts up. No judgment, just visibility.'}
               </ThemedText>
+              {transactions.length > 0 ? (
+                <View style={styles.flowRow}>
+                  <View style={styles.flowStat}>
+                    <ThemedText type="smallBold">In {formatCurrency(incoming)}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">money in</ThemedText>
+                  </View>
+                  <View style={styles.flowStat}>
+                    <ThemedText type="smallBold">Out {formatCurrency(outgoing)}</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">money out</ThemedText>
+                  </View>
+                </View>
+              ) : null}
             </Card>
 
             <CTAButton label="＋ Add transaction" onPress={openCreate} fullWidth />
@@ -396,7 +429,7 @@ export default function MoneyScreen() {
 
             <ScrollView keyboardShouldPersistTaps="handled" style={styles.sheetBody}>
               <ThemedText type="small" themeColor="textSecondary">
-                A monthly cap for {MONTH_LABEL}. The bar above shows how much is left.
+                A monthly cap for {monthLabel}. The bar above shows how much is left.
               </ThemedText>
               <TextField
                 label="Monthly budget"
@@ -631,6 +664,16 @@ const styles = StyleSheet.create({
   total: {
     fontSize: 40,
     lineHeight: 48,
+  },
+  flowRow: {
+    flexDirection: 'row',
+    gap: Spacing.five,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(128,128,128,0.3)',
+    paddingTop: Spacing.three,
+  },
+  flowStat: {
+    gap: Spacing.half,
   },
   categoryRow: {
     flexDirection: 'row',

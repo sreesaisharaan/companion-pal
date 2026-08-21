@@ -316,7 +316,8 @@ declare
   v_task_due timestamptz;
   v_task_done timestamptz;
   v_requested integer := 10; -- base: task completed
-  v_today bigint;            -- task XP since the start of the UTC day
+  v_timezone text;           -- the user's profile timezone (for the daily cap)
+  v_today bigint;            -- task XP since the start of the *user's* local day
   v_amount integer;
   v_ledger bigint;
   v_stage text;
@@ -329,6 +330,16 @@ begin
   from public.companions
   where user_id = p_user_id
   for update;
+
+  -- The user's local day boundary for the daily cap. UTC midnight would
+  -- truncate/shift the budget for users in far-ahead timezones; use their
+  -- profile timezone so the 50 XP/day resets at THEIR midnight.
+  select timezone into v_timezone
+  from public.profiles
+  where id = p_user_id;
+  if v_timezone is null or v_timezone = '' then
+    v_timezone := 'UTC';
+  end if;
 
   select due_at, completed_at into v_task_due, v_task_done
   from public.tasks
@@ -349,13 +360,14 @@ begin
     v_requested := v_requested + 5;
   end if;
 
-  -- Task XP earned since the start of the current UTC day. Weekly reviews are
-  -- a separate budget and are excluded here.
+  -- Task XP earned since the start of the user's local calendar day (their
+  -- profile timezone, computed above). Weekly reviews are a separate budget
+  -- and are excluded here.
   select coalesce(sum(amount), 0) into v_today
   from public.xp_events
   where user_id = p_user_id
     and source <> 'weekly_review'
-    and created_at >= date_trunc('day', now());
+    and created_at >= (date_trunc('day', now() at time zone v_timezone)) at time zone v_timezone;
 
   v_amount := least(v_requested, greatest(0, 50 - v_today));
   if v_amount > 0 then

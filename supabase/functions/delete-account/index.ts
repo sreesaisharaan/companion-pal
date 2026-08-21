@@ -17,31 +17,7 @@
 import { verifyToken } from 'npm:@clerk/backend@1';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-// CORS answers are computed per request. By default any origin is allowed
-// (dev convenience); set the ALLOWED_ORIGINS secret to a comma-separated list
-// to restrict the function to specific web origins.
-function allowedOrigin(req: Request): string | null {
-  const allowlist = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (allowlist.length === 0) return '*';
-  return req.headers.get('Origin') ?? null;
-}
-
-function corsHeaders(req: Request): Record<string, string> {
-  const origin = allowedOrigin(req);
-  const headers: Record<string, string> = {
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Max-Age': '86400',
-  };
-  if (origin) {
-    headers['Access-Control-Allow-Origin'] = origin;
-    headers['Vary'] = 'Origin';
-  }
-  return headers;
-}
+import { corsHeaders } from '../_shared/cors.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',

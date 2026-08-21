@@ -7,6 +7,8 @@ export type BudgetCategory = {
   id: string;
   user_id: string;
   name: string;
+  /** Optional emoji shown in the Money breakdown; null falls back to a neutral glyph. */
+  emoji: string | null;
   color: string | null;
   position: number;
   created_at: string;
@@ -43,8 +45,10 @@ const CATEGORY_EMOJI: Record<string, string> = {
   Fun: '🎬',
 };
 
-/** Emoji for a category name, or a neutral glyph for uncategorised. */
-export function categoryEmoji(name: string | null): string {
+/** Emoji for a category: prefer the stored emoji (from budget_categories.emoji),
+ * else a built-in default by name, else a neutral glyph for uncategorised. */
+export function categoryEmoji(name: string | null, storedEmoji?: string | null): string {
+  if (storedEmoji) return storedEmoji;
   return (name && CATEGORY_EMOJI[name]) ?? '⋯';
 }
 
@@ -108,9 +112,9 @@ export function useBudgetCategories(userId: string | undefined) {
   });
 }
 
-export function useTransactions(userId: string | undefined, range: MoneyRange) {
+export function useTransactions(userId: string | undefined, range: MoneyRange, currency?: string) {
   return useQuery({
-    queryKey: [...transactionsKey, userId, range],
+    queryKey: [...transactionsKey, userId, range, currency ?? 'auto'],
     enabled: !!userId,
     queryFn: async () => {
       const db = requireSupabase();
@@ -118,9 +122,12 @@ export function useTransactions(userId: string | undefined, range: MoneyRange) {
       let request = db
         .from('transactions')
         .select('*')
-        .eq('user_id', userId as string)
-        .order('occurred_on', { ascending: false })
-        .order('created_at', { ascending: false });
+        .eq('user_id', userId as string);
+      // Scope to the current display currency so totals/bars never add up
+      // amounts in different currencies (e.g. an old USD row silently counted
+      // as EUR after a preference change).
+      if (currency) request = request.eq('currency', currency);
+      request = request.order('occurred_on', { ascending: false }).order('created_at', { ascending: false });
       if (start) {
         request = request.gte('occurred_on', start);
       }
@@ -132,17 +139,19 @@ export function useTransactions(userId: string | undefined, range: MoneyRange) {
 }
 
 /** Sum of this month's transactions (net, expenses negative) — for the Today snapshot. */
-export function useMonthTotal(userId: string | undefined) {
+export function useMonthTotal(userId: string | undefined, currency?: string) {
   return useQuery({
-    queryKey: ['transactions', 'month-total', userId],
+    queryKey: ['transactions', 'month-total', userId, currency ?? 'auto'],
     enabled: !!userId,
     queryFn: async () => {
       const db = requireSupabase();
-      const { data, error } = await db
+      let request = db
         .from('transactions')
         .select('amount_minor')
         .eq('user_id', userId as string)
         .gte('occurred_on', localDateString(startOfMonth()));
+      if (currency) request = request.eq('currency', currency);
+      const { data, error } = await request;
       if (error) throw error;
       return (data ?? []).reduce((sum, row) => sum + row.amount_minor, 0);
     },
@@ -232,7 +241,9 @@ async function resolveCategoryId(
   if (existing) return existing.id;
   const { data: created, error } = await db
     .from('budget_categories')
-    .insert({ user_id: userId, name })
+    // Persist the default emoji (if any) on get-or-create, so a suggested
+    // category keeps its icon across screens without a category screen.
+    .insert({ user_id: userId, name, emoji: CATEGORY_EMOJI[name] ?? null })
     .select('id')
     .maybeSingle();
   if (error) {
@@ -261,6 +272,9 @@ export type SaveTransactionInput = {
   note: string | null;
   /** Local calendar date (YYYY-MM-DD). */
   occurredOn: string;
+  /** ISO 4217 code actually used for this transaction. Stored per row so a
+   * later currency change never re-labels history. */
+  currency: string;
 };
 
 export function useSaveTransaction(userId: string | undefined) {
@@ -282,6 +296,7 @@ export function useSaveTransaction(userId: string | undefined) {
         user_id: userId,
         category_id: categoryId,
         amount_minor: input.amountMinor,
+        currency: input.currency,
         note: input.note?.trim() || null,
         occurred_on: input.occurredOn,
       };

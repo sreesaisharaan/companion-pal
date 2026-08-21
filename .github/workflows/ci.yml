@@ -33,14 +33,14 @@ jobs:
         with:
           version: v2.110.0
 
-      # Applies all migrations (0001–0007) and the (empty) seed file.
+      # Applies all migrations (0001–0012) and the (empty) seed file.
       - name: Start local Supabase
         run: supabase start
 
       - name: Install psql client
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
 
-      # plpgsql static analysis of the award RPCs (migration 0007) and
+      # plpgsql static analysis of the award RPCs (migration 0011) and
       # triggers. plpgsql_check is created if the image ships it (non-fatal
       # otherwise), and the step stays non-blocking so tooling quirks can't
       # gate the pipeline — the RLS suite below is the real gate.
@@ -88,3 +88,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Unit tests
+        run: npm test

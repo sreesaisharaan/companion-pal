@@ -17,6 +17,13 @@ export function AppQueryProvider({ children }: PropsWithChildren) {
             refetchOnWindowFocus: true,
             retry: 1,
           },
+          // Mutations (task complete, save transaction…) also pause while
+          // offline and retry once on reconnect, so a drop mid-write doesn't
+          // immediately surface an error and the user isn't double-submitting.
+          mutations: {
+            networkMode: 'online',
+            retry: 1,
+          },
         },
       }),
   );

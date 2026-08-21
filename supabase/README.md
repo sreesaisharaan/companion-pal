@@ -10,8 +10,10 @@ Schema, RLS policies, and tests for the Companion Life backend.
 - `migrations/0004_companion.sql` — `companions`, `xp_events`, signup provisioning trigger
 - `migrations/0005…0010` — reminders device id, currency/timezone auto prefs, unique lists
 - `migrations/0011_clerk_user_ids.sql` — Clerk auth: text user ids, RLS on `auth.jwt()->>'sub'`
+- `migrations/0012_category_emoji_and_validation.sql` — category emoji + note length checks
 - `tests/rls_policies.sql` — self-contained RLS + trigger + constraint tests
 - `functions/` — Edge Functions (`award-xp`, `delete-account`) that verify Clerk tokens
+- `functions/_shared/` — shared Edge Function helpers (CORS allowlist, ISO-week key)
 
 ## Rules baked into the schema
 
@@ -56,8 +58,10 @@ Schema, RLS policies, and tests for the Companion Life backend.
 
    ```bash
    supabase secrets set CLERK_SECRET_KEY=<secret key>
-   # Optional: restrict the edge functions to specific web origins (omit for
-   # "*" in development). Set it before deploying production.
+   # Restrict the edge functions to your real web origin(s). This is ENFORCED:
+   # every function reflects an incoming Origin back only when it is on the
+   # list, so any other site is blocked by the browser. Omit it only in
+   # development.
    supabase secrets set ALLOWED_ORIGINS=https://your-web-app.example.com
    supabase functions deploy award-xp delete-account
    ```
@@ -80,3 +84,31 @@ constraints all hold. The test users never persist.
 - XP totals are derived from `xp_events`; awarding logic (daily caps, stage
   recalculation) lives in the `award-xp` Edge Function so the service role key
   stays server-side only.
+
+## Known decisions
+
+- **Server-side XP + stage, read-only clients.** `companions.xp`/`stage` derive
+  from the `xp_events` ledger and can only be written by the service role; a
+  trigger blocks direct client edits and `xp_events` has no client insert path.
+- **The daily XP cap resets at the user's local midnight**, read from
+  `profiles.timezone` (falls back to UTC), not UTC midnight — so a far-ahead
+  timezone never shares a truncated budget across their day.
+- **Transaction currency is stored per row.** Totals and budget bars only sum
+  transactions in the current display currency, so changing the preferred
+  currency never mis-labels history or adds mixed-currency amounts. A one-way
+  migration of legacy USD rows to a new currency is a deliberate product call
+  and is intentionally *not* done automatically.
+- **Reminders and weekly-review preferences are device-local** (AsyncStorage /
+  expo-notifications). Do not silently "sync" them to the server without a
+  product decision about which device is authoritative — a server push and
+  per-device delivery are two different features.
+- **Offline writes are best-effort.** Reads refetch on reconnect; mutations
+  pause and retry once but are not queued yet. A durable offline queue is a
+  future feature.
+
+## Shipping
+
+- `build-apk.yml` builds an installable release APK with the **debug keystore**
+  (the same key Expo Go "preview" builds use), so it installs on any device.
+  Before public store submission, wire in a store-distribution keystore and
+  real versioning/OTA — see the comment at the top of that workflow.

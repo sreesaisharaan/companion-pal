@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Modal, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -138,7 +138,7 @@ export default function TodayScreen() {
   const upcomingTasks = useUpcomingTasks(userId);
   const completedToday = useCompletedToday(userId);
   const companion = useCompanion(userId);
-  const monthTotal = useMonthTotal(userId);
+  const monthTotal = useMonthTotal(userId, currency);
   const taskLists = useTaskLists(userId);
   const createTask = useCreateTask(userId);
   const completeTask = useCompleteTask();
@@ -342,6 +342,25 @@ export default function TodayScreen() {
   }
 
   const openTasks = useMemo(() => todayTasks.data ?? [], [todayTasks.data]);
+
+  // Task search — client-side filter over the open / upcoming / done lists.
+  // Empty query shows everything; otherwise match title, notes, or list name.
+  const [search, setSearch] = useState('');
+  const trimmedQuery = search.trim().toLowerCase();
+  const matchesQuery = useCallback(
+    (task: Task) => {
+      if (!trimmedQuery) return true;
+      if (task.title.toLowerCase().includes(trimmedQuery)) return true;
+      if ((task.notes ?? '').toLowerCase().includes(trimmedQuery)) return true;
+      const listName = task.list_id ? (listNameById.get(task.list_id) ?? '') : '';
+      return listName.toLowerCase().includes(trimmedQuery);
+    },
+    [trimmedQuery, listNameById],
+  );
+  const visibleOpen = useMemo(
+    () => (trimmedQuery ? openTasks.filter(matchesQuery) : openTasks),
+    [openTasks, trimmedQuery, matchesQuery],
+  );
   const bottomClearance =
     (Platform.OS === 'web' ? Spacing.seven + Spacing.five : BottomTabInset) +
     Spacing.four +
@@ -353,14 +372,14 @@ export default function TodayScreen() {
   const taskItems = useMemo(() => {
     const items: TaskListItem[] = [];
     let currentList: string | null = null;
-    for (const task of openTasks) {
+    for (const task of visibleOpen) {
       const listName = task.list_id ? (listNameById.get(task.list_id) ?? null) : null;
       if (listName && listName !== currentList) items.push({ type: 'listHeader', name: listName });
       currentList = listName;
       items.push({ type: 'task', task });
     }
     return items;
-  }, [openTasks, listNameById]);
+  }, [visibleOpen, listNameById]);
 
   const renderTaskItem = ({ item }: { item: TaskListItem }) => {
     if (item.type === 'listHeader') {
@@ -432,6 +451,15 @@ export default function TodayScreen() {
         </ThemedText>
       </Card>
 
+      {/* Search current tasks */}
+      <TextField
+        label="Search tasks"
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Filter by title, note, or list"
+        autoCorrect={false}
+      />
+
       {/* Quick capture */}
       <SectionTitle>Capture</SectionTitle>
       <Card style={{ gap: Spacing.three }}>
@@ -479,6 +507,16 @@ export default function TodayScreen() {
                 <ThemedText type="smallBold">Couldn’t load your tasks.</ThemedText>
                 <Button label="Try again" variant="secondary" onPress={() => todayTasks.refetch()} fullWidth />
               </Card>
+            ) : trimmedQuery && visibleOpen.length === 0 ? (
+              <Card style={{ gap: Spacing.three }}>
+                <ThemedView type="backgroundSelected" style={styles.emptyIllustration}>
+                  <ThemedText style={styles.emptyEmoji}>🔍</ThemedText>
+                </ThemedView>
+                <ThemedText type="smallBold">No matches</ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  Nothing matches “{search.trim()}” right now. Clear the search to see everything.
+                </ThemedText>
+              </Card>
             ) : openTasks.length === 0 ? (
               <Card style={{ gap: Spacing.three }}>
                 <ThemedView type="backgroundSelected" style={styles.emptyIllustration}>
@@ -496,11 +534,11 @@ export default function TodayScreen() {
         ListFooterComponent={
           <View style={styles.pageContent}>
             {/* Upcoming tasks — due after tomorrow (distant recurring tasks stay visible) */}
-            {(upcomingTasks.data ?? []).length > 0 ? (
+            {(upcomingTasks.data ?? []).filter(matchesQuery).length > 0 ? (
               <>
                 <SectionTitle>Upcoming</SectionTitle>
                 <Card style={{ gap: Spacing.four }}>
-                  {(upcomingTasks.data ?? []).map((task) => (
+                  {(upcomingTasks.data ?? []).filter(matchesQuery).map((task) => (
                     <TaskRow
                       key={task.id}
                       title={task.title}
@@ -517,11 +555,11 @@ export default function TodayScreen() {
             ) : null}
 
             {/* Completed today */}
-            {(completedToday.data ?? []).length > 0 ? (
+            {(completedToday.data ?? []).filter(matchesQuery).length > 0 ? (
               <>
                 <SectionTitle>Done today</SectionTitle>
                 <Card style={{ gap: Spacing.four }}>
-                  {(completedToday.data ?? []).map((task) => (
+                  {(completedToday.data ?? []).filter(matchesQuery).map((task) => (
                     <TaskRow
                       key={task.id}
                       title={task.title}

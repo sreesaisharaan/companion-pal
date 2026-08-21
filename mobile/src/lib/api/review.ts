@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { localDateString, startOfWeek } from '@/lib/api/money';
+import { isoWeekKey } from '@/lib/iso-week';
 import { requireSupabase } from '@/lib/supabase';
 
 export const weekReviewKey = ['week-review'] as const;
@@ -17,20 +18,6 @@ export type WeekStats = {
 };
 
 const EMPTY_STATS: WeekStats = { tasksCompleted: 0, xpEarned: 0, moneyMinor: 0, reviewed: false };
-
-/**
- * ISO-8601 week key (e.g. "2026-32") — must match the server exactly, because
- * the award-xp function keys weekly-review idempotency on it. Using the same
- * key avoids the local-vs-UTC week-boundary mismatch entirely.
- */
-export function isoWeekKey(date: Date): string {
-  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
-  return `${d.getUTCFullYear()}-${String(week).padStart(2, '0')}`;
-}
 
 /**
  * The weekly review snapshot: what happened this week, plus whether the review

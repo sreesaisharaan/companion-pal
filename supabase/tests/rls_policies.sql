@@ -199,6 +199,44 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------
+-- 7b. Migration 0012: category emoji + free-text length constraints
+-- ---------------------------------------------------------------------------
+do $$
+declare
+  user_a text;
+  cat_id uuid;
+begin
+  select id into user_a from public.profiles where email = 'user-a@example.com';
+  set local role authenticated;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "authenticated"}';
+
+  -- Get-or-create a category path writes the default emoji for a suggestion.
+  insert into public.budget_categories (user_id, name, emoji)
+  values (user_a, 'Groceries', '🛒') returning id into cat_id;
+  if cat_id is null then
+    raise exception 'FAIL 7b: could not create a category';
+  end if;
+
+  -- A too-long transaction note is rejected (check constraint, migration 0012).
+  begin
+    insert into public.transactions (user_id, amount_minor, occurred_on, note)
+    values (user_a, -100, current_date, repeat('x', 2001));
+    raise exception 'FAIL 7b: >2000-char transaction note was accepted';
+  exception
+    when check_violation then null; -- expected
+  end;
+
+  -- A too-long task note is rejected (check constraint, migration 0012).
+  begin
+    insert into public.tasks (user_id, title, notes)
+    values (user_a, 'note-limit-test', repeat('y', 2001));
+    raise exception 'FAIL 7b: >2000-char task note was accepted';
+  exception
+    when check_violation then null; -- expected
+  end;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- 8. XP award RPCs (migration 0007): owners cannot award, the daily task cap
 --    is enforced atomically, and the weekly review is exempt from AND
 --    excluded from the task budget.

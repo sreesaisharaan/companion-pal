@@ -2,7 +2,7 @@
 //
 // The client never decides reward amounts. This function verifies the caller's
 // Clerk session token and then delegates the actual award to a database
-// function (award_task_xp / award_weekly_review_xp in migration 0007). Those
+// function (award_task_xp / award_weekly_review_xp in migration 0011). Those
 // RPCs run with the service role, serialise per user with a row lock (so the
 // 50 XP/day cap can't be overshot by concurrent completions), and keep the
 // companion's derived XP/stage consistent with the ledger under concurrency.
@@ -16,40 +16,8 @@
 import { verifyToken } from 'npm:@clerk/backend@1';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
-// CORS answers are computed per request. By default any origin is allowed
-// (dev convenience); set the ALLOWED_ORIGINS secret to a comma-separated list
-// to restrict the function to specific web origins. OPTIONS preflights carry
-// no Authorization header, so they are answered before the auth check —
-// otherwise every web client is blocked by CORS.
-function allowedOrigin(req: Request): string | null {
-  const allowlist = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (allowlist.length === 0) return '*';
-  return req.headers.get('Origin') ?? null;
-}
-
-function corsHeaders(req: Request): Record<string, string> {
-  const origin = allowedOrigin(req);
-  const headers: Record<string, string> = {
-    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Max-Age': '86400',
-  };
-  if (origin) {
-    headers['Access-Control-Allow-Origin'] = origin;
-    headers['Vary'] = 'Origin';
-  }
-  return headers;
-}
-
-function json(body: unknown, req: Request, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
-  });
-}
+import { corsHeaders } from '../_shared/cors.ts';
+import { isoWeekKey } from '../_shared/iso-week.ts';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL') ?? '',
@@ -57,14 +25,11 @@ const supabase = createClient(
   { auth: { persistSession: false } },
 );
 
-/** ISO-8601 week key (e.g. "2026-32") — weekly reviews are unique per week. */
-function isoWeekKey(date: Date): string {
-  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
-  return `${d.getUTCFullYear()}-${String(week).padStart(2, '0')}`;
+function json(body: unknown, req: Request, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
+  });
 }
 
 Deno.serve(async (req) => {
