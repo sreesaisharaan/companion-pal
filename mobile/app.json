@@ -50,7 +50,8 @@
           "icon": "./assets/images/notification-icon.png"
         }
       ],
-      "expo-localization"
+      "expo-localization",
+      "expo-secure-store"
     ],
     "extra": {
       "store": {

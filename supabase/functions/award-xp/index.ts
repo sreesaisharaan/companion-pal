@@ -1,17 +1,19 @@
 // award-xp — server-side XP award for task completion.
 //
 // The client never decides reward amounts. This function verifies the caller's
-// JWT and then delegates the actual award to a database function
-// (award_task_xp / award_weekly_review_xp in migration 0007). Those RPCs run
-// with the service role, serialise per user with a row lock (so the 50 XP/day
-// cap can't be overshot by concurrent completions), and keep the companion's
-// derived XP/stage consistent with the ledger under concurrency. The weekly
-// review has its own once-per-week budget and is excluded from the task cap.
+// Clerk session token and then delegates the actual award to a database
+// function (award_task_xp / award_weekly_review_xp in migration 0007). Those
+// RPCs run with the service role, serialise per user with a row lock (so the
+// 50 XP/day cap can't be overshot by concurrent completions), and keep the
+// companion's derived XP/stage consistent with the ledger under concurrency.
+// The weekly review has its own once-per-week budget and is excluded from the
+// task cap.
 //
 // Deployment: `supabase db push` (applies the RPCs), then
-// `supabase functions deploy award-xp` (service-role key secret is provisioned
-// automatically).
+// `supabase secrets set CLERK_SECRET_KEY=...` and
+// `supabase functions deploy award-xp`.
 
+import { verifyToken } from 'npm:@clerk/backend@1';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 // Browsers preflight cross-origin fetches (the web client calls this function
@@ -54,14 +56,22 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  // 1. Identify the caller from their JWT.
+  // 1. Identify the caller from their Clerk session token.
   const authorization = req.headers.get('Authorization');
   const token = authorization?.startsWith('Bearer ') ? authorization.slice(7) : authorization;
   if (!token) return json({ error: 'missing authorization' }, 401);
 
-  const { data: userData, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !userData.user) return json({ error: 'unauthorized' }, 401);
-  const userId = userData.user.id;
+  const secretKey = Deno.env.get('CLERK_SECRET_KEY') ?? '';
+  if (!secretKey) return json({ error: 'CLERK_SECRET_KEY is not configured' }, 500);
+
+  let userId: string | null = null;
+  try {
+    const payload = await verifyToken(token, { secretKey });
+    userId = payload.sub ?? null;
+  } catch {
+    return json({ error: 'unauthorized' }, 401);
+  }
+  if (!userId) return json({ error: 'unauthorized' }, 401);
 
   // 2. Read and validate the payload.
   let taskId: string | undefined;

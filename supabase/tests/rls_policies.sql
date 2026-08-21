@@ -1,18 +1,13 @@
 -- rls_policies.sql
 -- Self-contained RLS + trigger tests for Companion Life.
 --
--- NOTE: pgcrypto calls are schema-qualified (extensions.crypt/gen_salt) so the
--- suite runs correctly regardless of the session search_path — Supabase keeps
--- extensions in the `extensions` schema, and SQL-editor vs migration-runner
--- sessions differ in whether that schema is on the path.
---
 -- HOW TO RUN: open the Supabase dashboard SQL editor (or psql as the postgres
 -- role on `supabase start`) and run this whole file. It wraps everything in a
 -- transaction and RAISEs on the first failure, so a clean "Success" means all
 -- assertions passed. Nothing is left behind.
 --
 -- What it covers:
---   1. Signup trigger provisions profile + companion
+--   1. Profile provisioning trigger creates the companion
 --   2. Users only see their own rows (tasks, transactions)
 --   3. Users cannot insert rows owned by someone else
 --   4. Users cannot update or delete someone else's rows
@@ -21,59 +16,49 @@
 --   7. Money precision constraints are enforced
 --   8. XP award RPCs are service-role-only, enforce the daily cap atomically,
 --      and keep the weekly review out of the task budget
+--
+-- Auth is Clerk (migration 0011): user ids are text ("user_2abc…"), the app
+-- provisions the profile row itself, and RLS compares auth.jwt()->>'sub'
+-- against id/user_id. Tests emulate an authenticated request by setting
+-- request.jwt.claims to a Clerk-style sub.
 
 create extension if not exists pgcrypto;
 
 begin;
 
 -- ---------------------------------------------------------------------------
--- 1. Signup trigger
+-- 1. Profile provisioning trigger
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  new_user_id uuid := gen_random_uuid();
-  found_profile uuid;
-  found_companion uuid;
+  new_user_id text := 'user_trigger_test';
+  found_companion text;
 begin
-  insert into auth.users (
-    instance_id, id, aud, role, email, encrypted_password,
-    email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at
-  ) values (
-    (select id from auth.instances order by created_at asc limit 1), new_user_id, 'authenticated', 'authenticated',
-    'trigger-test@example.com', extensions.crypt('password', extensions.gen_salt('bf')),
-    now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb, now(), now()
-  );
-
-  select id into found_profile from public.profiles where id = new_user_id;
-  if found_profile is null then
-    raise exception 'FAIL 1: signup did not create a profile';
-  end if;
+  insert into public.profiles (id, email)
+  values (new_user_id, 'trigger-test@example.com');
 
   select user_id into found_companion from public.companions where user_id = new_user_id;
   if found_companion is null then
-    raise exception 'FAIL 1: signup did not create a companion';
+    raise exception 'FAIL 1: profile insert did not provision a companion';
   end if;
 end $$;
 
 -- ---------------------------------------------------------------------------
--- Setup: two users with a task and a transaction each.
--- Users are real auth.users rows (profiles.id references auth.users.id, so a
--- profile cannot exist without its auth identity; the signup trigger
--- provisions profile + companion for each).
+-- Setup: two users with a task and a transaction each. Profiles are inserted
+-- directly with Clerk-style text ids; the on_profile_created trigger
+-- provisions a companion for each.
 -- ---------------------------------------------------------------------------
 do $$
 begin
-  insert into auth.users (
-    instance_id, id, aud, role, email, encrypted_password
-  ) values
-    ((select id from auth.instances order by created_at asc limit 1), gen_random_uuid(), 'authenticated', 'authenticated', 'user-a@example.com', extensions.crypt('password', extensions.gen_salt('bf'))),
-    ((select id from auth.instances order by created_at asc limit 1), gen_random_uuid(), 'authenticated', 'authenticated', 'user-b@example.com', extensions.crypt('password', extensions.gen_salt('bf')));
+  insert into public.profiles (id, email) values
+    ('user_a', 'user-a@example.com'),
+    ('user_b', 'user-b@example.com');
 end $$;
 
 do $$
 declare
-  user_a uuid;
-  user_b uuid;
+  user_a text;
+  user_b text;
 begin
   select id into user_a from public.profiles where email = 'user-a@example.com';
   select id into user_b from public.profiles where email = 'user-b@example.com';
@@ -92,8 +77,8 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  user_a uuid;
-  user_b uuid;
+  user_a text;
+  user_b text;
   visible_tasks bigint;
   visible_txns bigint;
   b_task uuid;
@@ -103,7 +88,7 @@ begin
   select id into b_task from public.tasks where user_id = user_b limit 1;
 
   set local role authenticated;
-  set local request.jwt.claim.sub = user_a::text;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "authenticated"}';
 
   -- A sees exactly their own rows.
   select count(*) into visible_tasks from public.tasks;
@@ -151,11 +136,11 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  user_a uuid;
+  user_a text;
 begin
   select id into user_a from public.profiles where email = 'user-a@example.com';
   set local role authenticated;
-  set local request.jwt.claim.sub = user_a::text;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "authenticated"}';
 
   begin
     insert into public.xp_events (user_id, source, amount, idempotency_key)
@@ -171,11 +156,11 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  user_a uuid;
+  user_a text;
 begin
   select id into user_a from public.profiles where email = 'user-a@example.com';
   set local role authenticated;
-  set local request.jwt.claim.sub = user_a::text;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "authenticated"}';
 
   begin
     update public.companions set xp = 999999 where user_id = user_a;
@@ -190,11 +175,11 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  user_a uuid;
+  user_a text;
 begin
   select id into user_a from public.profiles where email = 'user-a@example.com';
   set local role authenticated;
-  set local request.jwt.claim.sub = user_a::text;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "authenticated"}';
 
   begin
     insert into public.transactions (user_id, amount_minor, occurred_on)
@@ -220,7 +205,7 @@ end $$;
 -- ---------------------------------------------------------------------------
 do $$
 declare
-  user_a uuid;
+  user_a text;
   task_a uuid;
   t uuid;
   overflow uuid;
@@ -233,7 +218,7 @@ begin
   --     specific insufficient_privilege (42501) is caught — any other error
   --     (e.g. a missing function) would fail the suite.
   set local role authenticated;
-  set local request.jwt.claim.sub = user_a::text;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "authenticated"}';
   begin
     perform public.award_task_xp(user_a, task_a);
     raise exception 'FAIL 8a: owner could award XP directly';
@@ -243,8 +228,11 @@ begin
   reset role;
 
   -- 8b. The service role awards +10 for a completed task; re-awarding the same
-  --     task is idempotent (retries can never double-count).
+  --     task is idempotent (retries can never double-count). The claims carry
+  --     role=service_role so the companions_guard_xp trigger allows the XP
+  --     update, exactly as a service-role JWT would in production.
   set local role service_role;
+  set local request.jwt.claims = '{"sub": "user_a", "role": "service_role"}';
   update public.tasks set completed_at = now() where id = task_a;
   res := public.award_task_xp(user_a, task_a);
   if (res->>'awarded')::int <> 10 then

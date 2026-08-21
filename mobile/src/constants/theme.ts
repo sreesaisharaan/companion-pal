@@ -79,8 +79,10 @@ export const Colors = {
     border: '#2A2A2A',
     // Stronger rule for interactive outlines (buttons)
     outline: '#3D3D3D',
-    // Card hierarchy: raised sheet (hero) over near-black supports
-    cardPrimary: '#242424',
+    // Card hierarchy: raised sheet (hero) over near-black supports.
+    // Sits above backgroundSelected (#242424) so the hero card reads as
+    // elevated, not merged with selected filter pills.
+    cardPrimary: '#2E2E2E',
     cardSecondary: '#0D0D0D',
     // Primary action buttons (solid paper)
     ctaPrimary: '#F5F5F5',

@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 
 import { Screen } from '@/components/screen';
 import { SectionTitle } from '@/components/section-title';
@@ -15,14 +15,16 @@ import { APPEARANCE_OPTIONS, setAppearancePreference, useAppearance } from '@/ho
 import { useAuth } from '@/lib/auth-context';
 
 export default function SignInScreen() {
-  const { isConfigured, signIn, signUp } = useAuth();
+  const { signIn, signUp, verifySignUp, signInWithOAuth } = useAuth();
   const appearance = useAppearance();
   const [mode, setMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmationSent, setConfirmationSent] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
 
   async function handleSubmit() {
     if (!email.trim() || !password) {
@@ -40,16 +42,48 @@ export default function SignInScreen() {
         return;
       }
 
-      if (mode === 'sign-up') {
-        // With email confirmation enabled, signUp returns no session — tell the
-        // user what to do next instead of silently switching modes.
-        setConfirmationSent(true);
-        setError(null);
+      if (mode === 'sign-up' && 'needsVerification' in result && result.needsVerification) {
+        // Clerk emails a verification code before the account is usable.
+        setVerifying(true);
       }
+    } catch (e) {
+      // Clerk can throw structured errors (bot protection, blocked email
+      // domain, …) — surface them instead of failing silently.
+      setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
     } finally {
       // A thrown signIn/signUp (e.g. network failure) must not strand the
       // button in its loading state.
       setSubmitting(false);
+    }
+  }
+
+  async function handleVerify() {
+    if (!code.trim()) {
+      setError('Enter the code from your email.');
+      return;
+    }
+    setError(null);
+    setSubmitting(true);
+    try {
+      const result = await verifySignUp(code.trim());
+      if (result.error) setError(result.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleOAuth(provider: 'google' | 'apple' | 'github') {
+    setError(null);
+    setOauthLoading(true);
+    try {
+      const result = await signInWithOAuth(provider);
+      if (result.error) {
+        setError(result.error);
+      }
+    } finally {
+      setOauthLoading(false);
     }
   }
 
@@ -71,67 +105,93 @@ export default function SignInScreen() {
         </ThemedText>
       </ThemedView>
 
-      {isConfigured ? (
-        <Card elevated>
-          <TextField
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            autoComplete="email"
-            keyboardType="email-address"
-            placeholder="you@example.com"
-          />
-          <TextField
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-            placeholder={mode === 'sign-in' ? 'Your password' : 'At least 6 characters'}
-          />
-          {error ? (
-            <ThemedText type="smallBold" themeColor="danger">{error}</ThemedText>
-          ) : null}
-          {confirmationSent ? (
-            <ThemedView type="successSoft" style={styles.confirmBox}>
-              <ThemedText type="small" themeColor="success">
-                Account created! Check your inbox for a confirmation link, then sign in.
-              </ThemedText>
-            </ThemedView>
-          ) : null}
-          <Button
-            label={mode === 'sign-in' ? 'Sign in' : 'Create account'}
-            onPress={handleSubmit}
-            loading={submitting}
-            fullWidth
-          />
-          <View style={styles.switchRow}>
-            <ThemedText type="small" themeColor="textSecondary">
-              {mode === 'sign-in' ? 'New here?' : 'Already have an account?'}
-            </ThemedText>
-            <Button
-              label={mode === 'sign-in' ? 'Create an account' : 'Sign in instead'}
-              variant="ghost"
-              onPress={() => {
-                setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');
-                setError(null);
-                setConfirmationSent(false);
-              }}
-            />
-          </View>
-        </Card>
-      ) : (
-        <Card elevated>
-          <ThemedText type="smallBold">Setup required</ThemedText>
+      <Card elevated>
+        {/* ── OAuth buttons ─────────────────────────────────────────── */}
+        <Button
+          label="Continue with Google"
+          onPress={() => handleOAuth('google')}
+          variant="secondary"
+          loading={oauthLoading}
+          disabled={submitting}
+          fullWidth
+        />
+
+        {/* ── Divider ─────────────────────────────────────────────── */}
+        <View style={styles.dividerRow}>
+          <View style={styles.dividerLine} />
           <ThemedText type="small" themeColor="textSecondary">
-            Add your Supabase project credentials to <ThemedText type="code">mobile/.env</ThemedText>{' '}
-            (see <ThemedText type="code">mobile/.env.example</ThemedText>) and run{' '}
-            <ThemedText type="code">supabase db push</ThemedText> against your project. The app
-            will light up once EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY are set.
+            or
           </ThemedText>
-        </Card>
-      )}
+          <View style={styles.dividerLine} />
+        </View>
+
+        {/* ── Email / password ────────────────────────────────────── */}
+        {verifying ? (
+          <>
+            <ThemedText type="small" themeColor="textSecondary">
+              We emailed a verification code to {email.trim()}. Enter it below to finish
+              creating your account.
+            </ThemedText>
+            <TextField
+              label="Verification code"
+              value={code}
+              onChangeText={setCode}
+              keyboardType="number-pad"
+              placeholder="6-digit code"
+            />
+            {error ? (
+              <ThemedText type="smallBold" themeColor="danger">{error}</ThemedText>
+            ) : null}
+            <Button label="Verify email" onPress={handleVerify} loading={submitting} fullWidth />
+          </>
+        ) : (
+          <>
+            <TextField
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+              placeholder="you@example.com"
+            />
+            <TextField
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
+              placeholder={mode === 'sign-in' ? 'Your password' : 'At least 6 characters'}
+            />
+            {error ? (
+              <ThemedText type="smallBold" themeColor="danger">{error}</ThemedText>
+            ) : null}
+            <Button
+              label={mode === 'sign-in' ? 'Sign in' : 'Create account'}
+              onPress={handleSubmit}
+              loading={submitting}
+              disabled={oauthLoading}
+              fullWidth
+            />
+            <View style={styles.switchRow}>
+              <ThemedText type="small" themeColor="textSecondary">
+                {mode === 'sign-in' ? 'New here?' : 'Already have an account?'}
+              </ThemedText>
+              <Button
+                label={mode === 'sign-in' ? 'Create an account' : 'Sign in instead'}
+                variant="ghost"
+                onPress={() => {
+                  setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');
+                  setError(null);
+                }}
+              />
+            </View>
+          </>
+        )}
+
+        {/* Clerk's bot protection needs this mount point on web sign-ups. */}
+        {Platform.OS === 'web' ? <View nativeID="clerk-captcha" /> : null}
+      </Card>
 
       <SectionTitle>Preferences</SectionTitle>
       <Card style={{ gap: Spacing.three }}>
@@ -173,6 +233,16 @@ const styles = StyleSheet.create({
   centerText: {
     textAlign: 'center',
   },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#C6C6C6',
+  },
   switchRow: {
     alignItems: 'center',
     gap: Spacing.two,
@@ -186,10 +256,5 @@ const styles = StyleSheet.create({
   prefCopy: {
     flex: 1,
     gap: Spacing.half,
-  },
-  confirmBox: {
-    borderRadius: 12,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
   },
 });

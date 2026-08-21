@@ -439,7 +439,7 @@ export default function ProfileScreen() {
         </ThemedView>
         <ThemedText type="smallBold">{email}</ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
-          Signed in via Supabase. Your currency and timezone preferences sync to your profile.
+          Signed in with Clerk. Your currency and timezone preferences sync to your profile.
         </ThemedText>
       </Card>
 

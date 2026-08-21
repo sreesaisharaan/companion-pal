@@ -35,11 +35,26 @@ const storageAdapter = {
 
 export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
+/**
+ * The app authenticates with Clerk; Supabase only stores data. Every request
+ * must carry a Clerk session token that Supabase accepts (via the Clerk
+ * Supabase integration), so the auth context installs a getter that returns
+ * the current Clerk token. Supabase-js invokes it lazily per request.
+ */
+let supabaseTokenGetter: (() => Promise<string | null>) | null = null;
+
+export function setSupabaseTokenGetter(
+  getter: (() => Promise<string | null>) | null,
+) {
+  supabaseTokenGetter = getter;
+}
+
 function createSupabaseClient() {
   if (!isSupabaseConfigured) {
     return null;
   }
   return createClient(supabaseUrl as string, supabaseAnonKey as string, {
+    accessToken: async () => (await supabaseTokenGetter?.()) ?? null,
     auth: {
       storage: storageAdapter,
       autoRefreshToken: true,

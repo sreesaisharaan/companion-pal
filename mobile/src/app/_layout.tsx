@@ -1,3 +1,5 @@
+import { ClerkProvider } from '@clerk/expo';
+import { tokenCache } from '@clerk/expo/token-cache';
 import { Image } from 'expo-image';
 import { router, Stack, usePathname } from 'expo-router';
 import Head from 'expo-router/head';
@@ -6,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import { AppState, Platform, StyleSheet } from 'react-native';
 
+import { ErrorBoundary } from '@/components/error-boundary';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -13,6 +16,12 @@ import { useTheme } from '@/hooks/use-theme';
 import { AuthProvider, useAuth } from '@/lib/auth-context';
 import { notificationDeepLink, notifications, scheduleCompanionNudge } from '@/lib/notifications';
 import { AppQueryProvider } from '@/lib/query-provider';
+
+const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
+
+if (!publishableKey) {
+  throw new Error("Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY. Add your key to .env.\nRun: 1) clerk auth login  2) clerk link  3) clerk env pull — then restart the dev server.");
+}
 
 SplashScreen.preventAutoHideAsync();
 
@@ -128,21 +137,25 @@ function RootNavigator() {
           NavigationContainer always uses react-navigation's light theme behind the
           scenes, so a transparent contentStyle lets that light-grey sheet show
           through during stack transitions / overscroll when dark mode is active. */}
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
-        <Stack.Screen name="(auth)" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
+      <ErrorBoundary>
+        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
+          <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(tabs)" />
+        </Stack>
+      </ErrorBoundary>
     </>
   );
 }
 
 export default function RootLayout() {
   return (
-    <AppQueryProvider>
-      <AuthProvider>
-        <RootNavigator />
-      </AuthProvider>
-    </AppQueryProvider>
+    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+      <AppQueryProvider>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
+      </AppQueryProvider>
+    </ClerkProvider>
   );
 }
 
