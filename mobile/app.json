@@ -2,7 +2,7 @@
   "expo": {
     "name": "Companion Life",
     "slug": "companion-life",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "companionlife",
@@ -10,12 +10,12 @@
     "ios": {
       "icon": "./assets/images/icon.png",
       "bundleIdentifier": "com.companionlife.app",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "supportsTablet": true
     },
     "android": {
       "package": "com.companionlife.app",
-      "versionCode": 2,
+      "versionCode": 3,
       "permissions": [
         "VIBRATE",
         "RECEIVE_BOOT_COMPLETED"

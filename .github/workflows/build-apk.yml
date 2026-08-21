@@ -32,6 +32,7 @@ jobs:
       # backend config would show only the setup screen.
       EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
       EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY }}
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
 
@@ -41,11 +42,16 @@ jobs:
 
       - name: Verify Supabase secrets are set
         run: |
-          if [ -z "$EXPO_PUBLIC_SUPABASE_URL" ] || [ -z "$EXPO_PUBLIC_SUPABASE_ANON_KEY" ]; then
-            echo "::error::Missing EXPO_PUBLIC_SUPABASE_URL / EXPO_PUBLIC_SUPABASE_ANON_KEY secrets. Add them under Settings → Secrets and variables → Actions, then re-run this workflow."
-            exit 1
-          fi
-          echo "Supabase env vars present ✓"
+          missing=0
+          for var in EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_ANON_KEY EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY; do
+            eval "val=\$$var"
+            if [ -z "$val" ]; then
+              echo "::error::Missing $var secret. Add it under Settings → Secrets and variables → Actions, then re-run this workflow."
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then exit 1; fi
+          echo "All env vars present ✓"
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -91,7 +97,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: companion-life-v2-apk
+          name: companion-life-v3-apk
           path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
           retention-days: 30
